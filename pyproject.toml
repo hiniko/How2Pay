@@ -1,0 +1,30 @@
+[project]
+name = "finances"
+version = "0.1.0"
+description = "Personal finance management tool"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    'rich',
+    'PyYAML',
+    'typer'
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0"
+]
+
+[project.scripts]
+how2pay = "finances.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["finances*", "commands*", "models*", "helpers*", "scheduler*", "exporters*", "tui*"]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
