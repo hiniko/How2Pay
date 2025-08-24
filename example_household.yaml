@@ -1,0 +1,164 @@
+bills:
+- amount: 85.0
+  name: Electricity Bill
+  recurrence:
+    end: null
+    every: 1
+    interval: monthly
+    kind: calendar
+    start: 2025-08-01
+  share:
+  - payee: Alice
+    percentage: 33.33
+  - payee: Bob
+    percentage: 33.33
+  - payee: Charlie
+    percentage: 33.34
+
+- amount: 120.0
+  name: Groceries
+  recurrence:
+    end: null
+    every: 1
+    interval: weekly
+    kind: interval
+    start: 2025-08-08
+  share:
+  - payee: Alice
+    percentage: 25.0
+  - payee: Bob
+    percentage: 35.0
+  - payee: Charlie
+    percentage: 40.0
+
+- amount: 75.0
+  name: Internet & TV
+  recurrence:
+    end: null
+    every: 1
+    interval: monthly
+    kind: calendar
+    start: 2025-08-15
+  share: []
+
+- amount: 95.0
+  name: Phone Bill
+  recurrence:
+    end: null
+    every: 1
+    interval: monthly
+    kind: calendar
+    start: 2025-08-22
+  share: []
+
+- amount: 150.0
+  name: Council Tax
+  recurrence:
+    end: null
+    every: 1
+    interval: monthly
+    kind: calendar
+    start: 2025-08-01
+  share: []
+
+- amount: 250.0
+  name: Household Supplies
+  recurrence:
+    end: null
+    every: 2
+    interval: monthly
+    kind: calendar
+    start: 2025-08-22
+  share: []
+
+- amount: 45.0
+  name: Netflix Subscription
+  recurrence:
+    end: null
+    every: 1
+    interval: monthly
+    kind: calendar
+    start: 2025-08-10
+  share:
+  - payee: Bob
+    percentage: 100.0
+
+- amount: 35.0
+  name: Gym Membership
+  recurrence:
+    end: 2025-12-31
+    every: 1
+    interval: monthly
+    kind: calendar
+    start: 2025-08-05
+  share:
+  - payee: Alice
+    percentage: 60.0
+  - payee: Charlie
+    percentage: 40.0
+
+payees:
+- description: Software Engineer - Main earner
+  name: Alice
+  pay_schedules:
+  - amount: 2200.0
+    description: Monthly Salary
+    recurrence:
+      end: null
+      every: 1
+      interval: monthly
+      kind: calendar
+      start: 2025-08-27
+  - amount: 450.0
+    description: Freelance Project
+    recurrence:
+      end: 2025-12-31
+      every: 1
+      interval: monthly
+      kind: calendar
+      start: 2025-08-15
+
+- description: Part-time Teacher
+  name: Bob
+  pay_schedules:
+  - amount: 1200.0
+    description: Teaching Salary
+    recurrence:
+      end: null
+      every: 1
+      interval: monthly
+      kind: calendar
+      start: 2025-08-28
+  - amount: 300.0
+    description: Tutoring
+    recurrence:
+      end: null
+      every: 1
+      interval: weekly
+      kind: interval
+      start: 2025-08-05
+
+- description: Graduate Student
+  name: Charlie
+  pay_schedules:
+  - amount: 800.0
+    description: Research Stipend
+    recurrence:
+      end: null
+      every: 1
+      interval: monthly
+      kind: calendar
+      start: 2025-08-01
+  - amount: 200.0
+    description: Weekend Job
+    recurrence:
+      end: null
+      every: 1
+      interval: weekly
+      kind: interval
+      start: 2025-08-03
+
+schedule_options:
+  cutoff_day: 22
+  default_projection_months: 12
+  weekend_adjustment: last_working_day

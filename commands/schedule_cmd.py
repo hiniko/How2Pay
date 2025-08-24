@@ -23,7 +23,8 @@ def show(
     months: Optional[int] = typer.Option(None, "--months", "-m", help="Number of months to project"),
     start_month: Optional[int] = typer.Option(None, "--start-month", help="Starting month (1-12)"),
     start_year: Optional[int] = typer.Option(None, "--start-year", help="Starting year"),
-    export_csv: Optional[str] = typer.Option(None, "--export", help="Export to CSV file")
+    export_csv: Optional[str] = typer.Option(None, "--export", help="Export to CSV file"),
+    export_pdf: Optional[str] = typer.Option(None, "--pdf", help="Export to PDF file")
 ) -> None:
     """Show cash flow projection schedule."""
     state: StateFile = load_state()
@@ -72,6 +73,22 @@ def show(
     if export_csv:
         CsvExporter.export_payment_schedule(result, export_csv)
         console.print(f"\n[green]Exported to {export_csv}[/green]")
+    
+    if export_pdf:
+        try:
+            from exporters.pdf_exporter import PdfExporter
+            
+            # Use the unified PDF export (household schedule)
+            PdfExporter.export_schedule_to_pdf(
+                result=result,
+                output_path=export_pdf,
+                payee_name=None  # None means household schedule
+            )
+            console.print(f"\n[green]Exported professional PDF to {export_pdf}[/green]")
+            
+        except ImportError as e:
+            console.print(f"\n[red]PDF export failed: {e}[/red]")
+            console.print("[yellow]Install PDF dependencies with: pip install -e '.[pdf]'[/yellow]")
 
 @config_app.command("show")
 def config_show() -> None:

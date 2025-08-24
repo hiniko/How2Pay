@@ -1,0 +1,244 @@
+/* Professional Schedule Table CSS for PDF Export */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    line-height: 1.4;
+    color: #2c3e50;
+    background: #ffffff;
+    padding: 20px;
+}
+
+.header {
+    text-align: center;
+    margin-bottom: 30px;
+    border-bottom: 3px solid #3498db;
+    padding-bottom: 20px;
+}
+
+.header h1 {
+    font-size: 24px;
+    color: #2c3e50;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.header .subtitle {
+    font-size: 14px;
+    color: #7f8c8d;
+    margin-bottom: 10px;
+}
+
+.header .generated {
+    font-size: 12px;
+    color: #95a5a6;
+}
+
+.schedule-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 auto;
+    background: white;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.schedule-table th {
+    background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+    color: white;
+    padding: 12px 8px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 11px;
+    border-right: 1px solid rgba(255,255,255,0.2);
+}
+
+.schedule-table th:last-child {
+    border-right: none;
+}
+
+.month-header {
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%) !important;
+    min-width: 100px;
+}
+
+.bills-header {
+    background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%) !important;
+    min-width: 120px;
+}
+
+.amount-header {
+    background: linear-gradient(135deg, #27ae60 0%, #229954 100%) !important;
+    min-width: 80px;
+}
+
+.detail-header {
+    background: linear-gradient(135deg, #8e44ad 0%, #7d3c98 100%) !important;
+    min-width: 90px;
+}
+
+.income-header {
+    background: linear-gradient(135deg, #16a085 0%, #138d75 100%) !important;
+}
+
+.stream-header {
+    background: linear-gradient(135deg, #16a085 0%, #138d75 100%) !important;
+    min-width: 100px;
+}
+
+.schedule-table td {
+    padding: 8px;
+    border-bottom: 1px solid #ecf0f1;
+    border-right: 1px solid #ecf0f1;
+    font-size: 10px;
+    vertical-align: middle;
+}
+
+.schedule-table td:last-child {
+    border-right: none;
+}
+
+.schedule-table tr:last-child td {
+    border-bottom: none;
+}
+
+.schedule-table tr:nth-child(even) {
+    background: #f8f9fa;
+}
+
+.schedule-table tr:hover {
+    background: #e3f2fd;
+}
+
+.month-cell {
+    background: linear-gradient(135deg, #fff5f5 0%, #ffe6e6 100%);
+    font-weight: 600;
+    color: #c0392b;
+    text-align: center;
+    vertical-align: middle;
+    border-right: 2px solid #e74c3c;
+}
+
+.bill-cell {
+    font-weight: 500;
+    color: #2c3e50;
+}
+
+.amount-cell {
+    text-align: right;
+    font-weight: 600;
+    color: #27ae60;
+}
+
+.total-cell {
+    font-weight: bold;
+    color: #2c3e50;
+    background: #ecf0f1;
+}
+
+.total-amount-cell {
+    text-align: right;
+    font-weight: bold;
+    color: #27ae60;
+    background: #ecf0f1;
+}
+
+.detail-cell {
+    background: linear-gradient(135deg, #f4f1ff 0%, #e8deff 100%);
+    font-weight: 600;
+    color: #7d3c98;
+    text-align: center;
+}
+
+.date-cell {
+    text-align: center;
+    color: #3498db;
+    font-weight: 500;
+}
+
+.required-cell {
+    text-align: right;
+    color: #e67e22;
+    font-weight: 600;
+}
+
+.percentage-cell {
+    text-align: center;
+    color: #8e44ad;
+    font-weight: 500;
+}
+
+.income-total-cell {
+    text-align: right;
+    font-weight: bold;
+    color: #16a085;
+    background: #e8f8f5;
+}
+
+.empty-cell {
+    color: #bdc3c7;
+}
+
+.info-box {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 30px;
+    text-align: center;
+    color: #495057;
+}
+
+.info-box h3 {
+    color: #343a40;
+    margin-bottom: 15px;
+}
+
+.no-data {
+    text-align: center;
+    padding: 50px;
+    color: #e67e22;
+}
+
+/* Page break rules for monthly sections */
+.month-section {
+    page-break-before: always;
+    margin-bottom: 20px;
+}
+
+.month-section:first-child,
+.month-section.first-month {
+    page-break-before: avoid;
+}
+
+@media print {
+    body { 
+        margin: 0;
+        padding: 10px;
+    }
+    .schedule-table {
+        box-shadow: none;
+    }
+    
+    /* Ensure month sections break to new pages */
+    .month-section {
+        page-break-before: always;
+        page-break-inside: avoid;
+        margin-bottom: 0;
+    }
+    
+    .month-section:first-child,
+    .month-section.first-month {
+        page-break-before: avoid;
+    }
+    
+    /* Prevent orphaned headers */
+    .month-header-row {
+        page-break-after: avoid;
+    }
+}

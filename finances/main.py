@@ -8,12 +8,11 @@ from commands.schedule_cmd import app as schedule_app
 
 
 from rich.console import Console
-import os
 import typer
 from typing import Optional
 
 from helpers.state_ops import save_state
-from helpers.config_ops import get_active_state_file, set_active_state_file
+from helpers.config_ops import set_active_state_file
 
 
 DEFAULT_STATE_FILE = 'how2pay_state.yaml'
@@ -39,9 +38,11 @@ app.add_typer(schedule_app, name="schedule")
 @app.command()
 def init(filename: str = DEFAULT_STATE_FILE):
     """Initialize a state file and set it as active context."""
-    state = {'bills': [], 'payees': []}
-    save_state(filename, state)
+    # Set the filename as active first, then save an empty state
     set_active_state_file(filename)
+    from models.state_file import StateFile
+    empty_state = StateFile()
+    save_state(empty_state)
     console.print(f'[bold green]Initialized and set active state file: {filename}[/bold green]')
 
 @app.callback()

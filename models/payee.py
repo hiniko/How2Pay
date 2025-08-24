@@ -4,13 +4,14 @@ from models.recurrence import Recurrence
 class PaySchedule:
     def __init__(
         self,
-        amount: float,
-        recurrence: Recurrence,
+        amount: Optional[float] = None,
+        recurrence: Recurrence = None,
         description: Optional[str] = None,
         weekend_adjustment: Optional[Literal['last_working_day', 'next_working_day']] = None,
         contribution_percentage: Optional[float] = None,
     ):
-        self.amount = amount
+        # Use default amount if not provided (for calculation purposes only)
+        self.amount = amount or 1000.0  # Default placeholder amount
         self.recurrence = recurrence
         self.description = description
         self.weekend_adjustment = weekend_adjustment or 'last_working_day'
@@ -22,7 +23,7 @@ class PaySchedule:
         if isinstance(recurrence, dict):
             recurrence = Recurrence.from_dict(recurrence)
         return PaySchedule(
-            amount=data.get('amount'),
+            amount=data.get('amount'),  # Will use default if None
             recurrence=recurrence,
             description=data.get('description'),
             weekend_adjustment=data.get('weekend_adjustment'),

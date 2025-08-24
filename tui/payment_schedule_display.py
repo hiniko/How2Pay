@@ -3,7 +3,9 @@ from typing import Dict, List
 from collections import defaultdict
 from rich.console import Console
 from rich.table import Table
-from scheduler.cash_flow import PaymentScheduleResult, WeekendAdjustment
+from scheduler.cash_flow import PaymentScheduleResult, WeekendAdjustment, BillDue
+from helpers.formatting import get_formatter
+from helpers.payee_colors import PayeeColorGenerator
 
 
 class PaymentScheduleDisplay:
@@ -11,9 +13,26 @@ class PaymentScheduleDisplay:
     
     def __init__(self, console: Console = None):
         self.console = console or Console()
+        self.formatter = get_formatter()
+        self.color_generator = PayeeColorGenerator()
+    
+    def _get_payee_colors(self, result: PaymentScheduleResult) -> Dict[str, str]:
+        """Get Rich-compatible colors for all payees in the result."""
+        # Extract unique payees from schedule items
+        payees = list(set(item.payee_name for item in result.schedule_items))
+        payees.sort()  # Ensure consistent ordering
+        
+        colors = {}
+        for i, payee_name in enumerate(payees):
+            colors[payee_name] = self.color_generator.get_payee_color(i, 'rich')
+        
+        return colors
     
     def display_pivot_table(self, result: PaymentScheduleResult) -> None:
         """Display payment schedule as a rich pivot table."""
+        # Get payee colors
+        payee_colors = self._get_payee_colors(result)
+        
         # Group data by month and payee/schedule
         monthly_data = defaultdict(lambda: defaultdict(list))
         
@@ -25,9 +44,11 @@ class PaymentScheduleDisplay:
         # Create lookup for weekend adjustments
         weekend_adj_lookup = self._create_weekend_adjustment_lookup(result.weekend_adjustments)
         
-        # Create lookup for monthly bill totals
+        # Create lookup for monthly bill totals and breakdowns
         bill_totals_lookup = {f"{bt.year}-{bt.month:02d}": bt.total_bills 
                              for bt in result.monthly_bill_totals}
+        bill_breakdown_lookup = {f"{bt.year}-{bt.month:02d}": bt.bills_due 
+                                for bt in result.monthly_bill_totals}
         
         # Get all unique payee-schedule combinations for columns, grouped by payee
         payee_schedules = defaultdict(list)
@@ -43,133 +64,460 @@ class PaymentScheduleDisplay:
         for payee in sorted_payees:
             all_payee_schedules.extend(sorted(payee_schedules[payee]))
         
-        # Create table
-        table = Table(title=f"12-Month Payment Schedule Starting {result.start_month}/{result.start_year}")
+        # Create table without internal lines - using strategic borders instead
+        table = Table(
+            title=f"12-Month Payment Schedule Starting {result.start_month}/{result.start_year}",
+            show_lines=False
+        )
         
-        # Add columns - first the fixed columns, then dynamic payee columns
+        # Add columns - new structure: Month | Bills | Bill Amounts | Detail | Payees
         table.add_column("Month", style="bold yellow", no_wrap=True)
+        table.add_column("Bills", style="bold", no_wrap=True)
+        table.add_column("Bill Amounts", style="bold red", justify="right")
         table.add_column("Detail", style="dim", no_wrap=True)
-        table.add_column("Monthly Bills", style="bold red", justify="right")
         
-        # Create column headers with payee grouping
-        for payee in sorted_payees:
-            payee_schedule_list = sorted(payee_schedules[payee])
-            for i, payee_schedule in enumerate(payee_schedule_list):
-                parts = payee_schedule.split(" - ", 1)
-                schedule_desc = parts[1] if len(parts) > 1 else ""
-                
-                if len(payee_schedule_list) == 1:
-                    # Single column for this payee - show payee name
-                    header = f"[bold cyan]{payee}[/bold cyan]\\n[dim]{schedule_desc}[/dim]"
-                else:
-                    # Multiple columns for this payee
-                    if i == 0:
-                        # First column shows payee name centered over all their columns
-                        header = f"[bold cyan]{payee}[/bold cyan]\\n[dim]{schedule_desc}[/dim]"
-                    else:
-                        # Subsequent columns just show schedule description
-                        header = f"[dim]{schedule_desc}[/dim]"
-                
-                table.add_column(header, justify="right", style="green")
+        # Add payee columns with payee names and colors
+        for payee_schedule in all_payee_schedules:
+            parts = payee_schedule.split(" - ", 1)
+            payee_name = parts[0]
+            schedule_desc = parts[1] if len(parts) > 1 else ""
+            
+            # Use payee color and show both name and schedule
+            payee_color = payee_colors.get(payee_name, "#ffffff")
+            header_text = f"[{payee_color}]{payee_name}[/{payee_color}]\n{schedule_desc}"
+            table.add_column(header_text, justify="right", style="green")
         
         # Sort months chronologically
         sorted_months = sorted(monthly_data.keys())
         
-        # Skip the first month in display (it's only used for income calculation)
-        display_months = sorted_months[1:] if len(sorted_months) > 1 else sorted_months
+        # We want to display months_ahead bill months starting from start_month
+        # The income data keys represent when income is received, which is used for the NEXT month's bills
+        # So we need to find income months that correspond to our desired bill months
+        display_months = []
+        current_bill_month = result.start_month
+        current_bill_year = result.start_year
+        
+        for i in range(result.months_ahead):
+            # For this bill month, find the corresponding income month (previous month)
+            if current_bill_month == 1:
+                income_month = 12
+                income_year = current_bill_year - 1
+            else:
+                income_month = current_bill_month - 1
+                income_year = current_bill_year
+            
+            income_month_key = f"{income_year}-{income_month:02d}"
+            
+            # Only include if we have income data for this bill month
+            if income_month_key in monthly_data:
+                display_months.append(income_month_key)
+            
+            # Advance to next bill month
+            current_bill_month += 1
+            if current_bill_month > 12:
+                current_bill_month = 1
+                current_bill_year += 1
+        
+        # Payee names are now in column headers, so no separate header row needed
         
         for month_key in display_months:
             month_data = monthly_data[month_key]
-            month_display = date.fromisoformat(f"{month_key}-01").strftime('%B %Y')
             
-            # Get monthly bill total for this month
-            month_bill_total = bill_totals_lookup.get(month_key, 0.0)
+            # The month_key represents when income is received. We need to find which
+            # month's bills this income is responsible for. Based on the cash flow logic,
+            # income from month X pays bills for month X+1
+            current_date = date.fromisoformat(f"{month_key}-01")
+            if current_date.month == 12:
+                bill_month_date = date(current_date.year + 1, 1, 1)
+            else:
+                bill_month_date = date(current_date.year, current_date.month + 1, 1)
+            bill_month_key = bill_month_date.strftime('%Y-%m')
             
-            # Payment dates row
-            row_dates = [month_display, "Payment Dates", ""]
+            # Display the BILL month name (what users expect to see)
+            month_display = bill_month_date.strftime('%B %Y')
+            
+            # Get the bills that this income is responsible for
+            bills_due = bill_breakdown_lookup.get(bill_month_key, [])
+            actual_bills_total = sum(bill.amount for bill in bills_due)
+            
+            # Calculate row requirements for both sections
+            bills_rows = len(bills_due) + 1 if bills_due else 1  # individual bills + TOTAL (or just "No bills")
+            payee_detail_rows = 4  # Payment Dates, Required, Percentage + TOTAL (removed Income Amount)
+            max_rows = max(bills_rows, payee_detail_rows)
+            
+            # Create bills section data
+            bills_section = []
+            if bills_due:
+                for bill in bills_due:
+                    bills_section.append((bill.bill_name, self.formatter.format_currency(bill.amount)))
+                bills_section.append(("TOTAL", self.formatter.format_currency(actual_bills_total)))
+            else:
+                bills_section.append(("No bills due", ""))
+            
+            # Pad bills section to max_rows
+            while len(bills_section) < max_rows:
+                bills_section.append(("", ""))
+            
+            # Create payee detail section data
+            payee_details = []
+            
+            # 1. Payment Dates
+            payee_row = ["Payment Dates"]
             for payee_schedule in all_payee_schedules:
                 if payee_schedule in month_data:
                     items = month_data[payee_schedule]
-                    dates = [item.payment_date.strftime('%m/%d') for item in items]
-                    row_dates.append(", ".join(dates))
+                    dates = [self.formatter.format_date_short(item.payment_date) for item in items]
+                    payee_row.append(", ".join(dates))
                 else:
-                    # Check for weekend adjustments
-                    adjustment = self._find_weekend_adjustment(
-                        weekend_adj_lookup, payee_schedule, month_key)
+                    adjustment = self._find_weekend_adjustment(weekend_adj_lookup, payee_schedule, month_key)
                     if adjustment:
-                        row_dates.append(f"→{adjustment.adjusted_date.strftime('%m/%d')}")
+                        payee_row.append(f"→{self.formatter.format_date_short(adjustment.adjusted_date)}")
                     else:
-                        row_dates.append("-")
-            table.add_row(*row_dates)
+                        payee_row.append("-")
+            payee_details.append(payee_row)
             
-            # Income amounts row
-            row_income = ["", "Income Amount", ""]
+            # 2. Required
+            payee_row = ["Required"]
             for payee_schedule in all_payee_schedules:
                 if payee_schedule in month_data:
                     items = month_data[payee_schedule]
-                    amounts = [f"${item.income_amount:.0f}" for item in items]
-                    row_income.append(", ".join(amounts))
+                    amounts = [self.formatter.format_currency(item.required_contribution) for item in items]
+                    payee_row.append(", ".join(amounts))
                 else:
-                    # Check for weekend adjustments
-                    adjustment = self._find_weekend_adjustment(
-                        weekend_adj_lookup, payee_schedule, month_key)
+                    adjustment = self._find_weekend_adjustment(weekend_adj_lookup, payee_schedule, month_key)
                     if adjustment:
-                        row_income.append(f"→${adjustment.income_amount:.0f}")
+                        payee_row.append("→Moved")
                     else:
-                        row_income.append("-")
-            table.add_row(*row_income)
+                        payee_row.append("-")
+            payee_details.append(payee_row)
             
-            # Required contribution row
-            row_required = ["", "Required", ""]
+            # 3. Percentage
+            payee_row = ["Percentage"]
             for payee_schedule in all_payee_schedules:
                 if payee_schedule in month_data:
                     items = month_data[payee_schedule]
-                    amounts = [f"${item.required_contribution:.2f}" for item in items]
-                    row_required.append(", ".join(amounts))
+                    percentages = [self.formatter.format_percentage(item.contribution_percentage) for item in items]
+                    payee_row.append(", ".join(percentages))
                 else:
-                    # Check for weekend adjustments
-                    adjustment = self._find_weekend_adjustment(
-                        weekend_adj_lookup, payee_schedule, month_key)
+                    adjustment = self._find_weekend_adjustment(weekend_adj_lookup, payee_schedule, month_key)
                     if adjustment:
-                        row_required.append("→Moved")
+                        payee_row.append("→Next")
                     else:
-                        row_required.append("-")
-            table.add_row(*row_required, style="bold")
+                        payee_row.append("-")
+            payee_details.append(payee_row)
             
-            # Percentage row
-            row_percentage = ["", "Percentage", ""]
+            # 4. TOTAL row for payee section - sum by payee, not by schedule
+            payee_row = ["[blue]TOTAL[/blue]"]
+            payee_totals = defaultdict(float)
+            
+            # Calculate totals by payee name
             for payee_schedule in all_payee_schedules:
                 if payee_schedule in month_data:
+                    payee_name = payee_schedule.split(" - ", 1)[0]
                     items = month_data[payee_schedule]
-                    percentages = [f"{item.contribution_percentage:.1f}%" for item in items]
-                    row_percentage.append(", ".join(percentages))
-                else:
-                    # Check for weekend adjustments
-                    adjustment = self._find_weekend_adjustment(
-                        weekend_adj_lookup, payee_schedule, month_key)
-                    if adjustment:
-                        row_percentage.append("→Next")
-                    else:
-                        row_percentage.append("-")
-            table.add_row(*row_percentage, style="dim")
+                    payee_totals[payee_name] += sum(item.required_contribution for item in items)
             
-            # Monthly payee totals row
-            monthly_payee_totals = ["", "Payee Totals", f"${month_bill_total:.2f}"]
-            for payee in sorted_payees:
-                payee_monthly_total = 0.0
-                payee_schedule_list = sorted(payee_schedules[payee])
+            # Create the row with payee totals, showing total only in first column for each payee
+            current_payee = ""
+            for payee_schedule in all_payee_schedules:
+                payee_name = payee_schedule.split(" - ", 1)[0]
+                if payee_name != current_payee:
+                    # First column for this payee - show the total in blue
+                    if payee_name in payee_totals:
+                        payee_row.append(f"[blue]{self.formatter.format_currency(payee_totals[payee_name])}[/blue]")
+                    else:
+                        payee_row.append("")
+                    current_payee = payee_name
+                else:
+                    # Subsequent columns for same payee - empty to simulate merged cell
+                    payee_row.append("")
+            payee_details.append(payee_row)
+            
+            # Pad payee details to max_rows
+            while len(payee_details) < max_rows:
+                empty_row = [""] + [""] * len(all_payee_schedules)
+                payee_details.append(empty_row)
+            
+            # Create the actual table rows by combining both sections
+            for i in range(max_rows):
+                # Month column (only show in first row)
+                month_col = month_display if i == 0 else ""
                 
-                # Calculate total for this payee for this month only
-                for payee_schedule in payee_schedule_list:
-                    if payee_schedule in month_data:
-                        payee_monthly_total += sum(item.required_contribution for item in month_data[payee_schedule])
+                # Bills columns
+                bill_name, bill_amount = bills_section[i]
                 
-                # Add the total for first column of this payee, empty for subsequent columns
-                monthly_payee_totals.append(f"${payee_monthly_total:.2f}")
-                for _ in range(len(payee_schedule_list) - 1):
-                    monthly_payee_totals.append("")
+                # Detail column + payee columns
+                detail_and_payees = payee_details[i]
+                
+                # Combine all columns: Month | Bills | Bill Amounts | Detail | Payees...
+                row = [month_col, bill_name, bill_amount] + detail_and_payees
+                
+                # Apply styling for specific rows
+                style = None
+                if bill_name == "TOTAL":
+                    style = "bold blue"
+                elif "[blue]TOTAL[/blue]" in str(detail_and_payees[0]) and bill_name == "":
+                    # TOTAL row for payee section - already has blue markup in the detail column
+                    style = "bold"
+                elif detail_and_payees[0] == "Required" and bill_name == "":
+                    # Only apply bold to payee detail rows, not bill rows
+                    style = "bold"
+                elif detail_and_payees[0] == "Percentage" and bill_name == "":
+                    # Only apply dim to payee detail rows, not bill rows  
+                    style = "dim"
+                    
+                table.add_row(*row, style=style)
             
-            table.add_row(*monthly_payee_totals, style="bold blue")
+            # Add separator between months - using section for strategic borders
+            if month_key != display_months[-1]:
+                table.add_section()
+        
+        self.console.print(table)
+    
+    def display_payee_schedule(self, result: PaymentScheduleResult, payee_name: str) -> None:
+        """Display payment schedule for a specific payee only."""
+        # Get payee colors
+        payee_colors = self._get_payee_colors(result)
+        
+        # Filter schedule items for this payee
+        payee_items = [item for item in result.schedule_items if item.payee_name == payee_name]
+        
+        if not payee_items:
+            self.console.print(f"[yellow]No schedule items found for payee '{payee_name}'[/yellow]")
+            return
+        
+        # Group data by month for this payee
+        monthly_data = defaultdict(lambda: defaultdict(list))
+        
+        for item in payee_items:
+            month_key = item.payment_date.strftime('%Y-%m')
+            schedule_key = item.schedule_description
+            monthly_data[month_key][schedule_key].append(item)
+        
+        # Create lookup for weekend adjustments
+        weekend_adj_lookup = self._create_weekend_adjustment_lookup(result.weekend_adjustments)
+        
+        # Create lookup for monthly bill totals filtered for this payee
+        bill_totals_lookup = {f"{bt.year}-{bt.month:02d}": bt.total_bills 
+                             for bt in result.monthly_bill_totals}
+        bill_breakdown_lookup = {f"{bt.year}-{bt.month:02d}": bt.bills_due 
+                                for bt in result.monthly_bill_totals}
+        
+        # Get all unique schedules for this payee
+        all_schedules = set()
+        for month_data in monthly_data.values():
+            all_schedules.update(month_data.keys())
+        all_schedules = sorted(all_schedules)
+        
+        # Create table with colored payee name
+        payee_color = payee_colors.get(payee_name, "#ffffff")
+        table = Table(
+            title=f"12-Month Payment Schedule for [bold {payee_color}]{payee_name}[/bold {payee_color}] Starting {result.start_month}/{result.start_year}",
+            show_lines=False
+        )
+        
+        # Add columns: Month | Bills | Bill Amounts | Detail | Income Streams
+        table.add_column("Month", style="bold yellow", no_wrap=True)
+        table.add_column("Bills (Payee Share)", style="bold", no_wrap=True)
+        table.add_column("Payee Amount", style="bold red", justify="right")
+        table.add_column("Detail", style="dim", no_wrap=True)
+        
+        # Add income stream columns with payee name
+        for schedule in all_schedules:
+            # Since this is payee-specific, show the payee name with their color
+            payee_color = payee_colors.get(payee_name, "#ffffff")
+            header_text = f"[{payee_color}]{payee_name}[/{payee_color}]\n{schedule}"
+            table.add_column(header_text, justify="right", style="green")
+        
+        # Sort months chronologically
+        sorted_months = sorted(monthly_data.keys())
+        
+        # We want to display months_ahead bill months starting from start_month
+        # The income data keys represent when income is received, which is used for the NEXT month's bills
+        # So we need to find income months that correspond to our desired bill months
+        display_months = []
+        current_bill_month = result.start_month
+        current_bill_year = result.start_year
+        
+        for i in range(result.months_ahead):
+            # For this bill month, find the corresponding income month (previous month)
+            if current_bill_month == 1:
+                income_month = 12
+                income_year = current_bill_year - 1
+            else:
+                income_month = current_bill_month - 1
+                income_year = current_bill_year
+            
+            income_month_key = f"{income_year}-{income_month:02d}"
+            
+            # Only include if we have income data for this bill month
+            if income_month_key in monthly_data:
+                display_months.append(income_month_key)
+            
+            # Advance to next bill month
+            current_bill_month += 1
+            if current_bill_month > 12:
+                current_bill_month = 1
+                current_bill_year += 1
+        
+        for month_key in display_months:
+            month_data = monthly_data[month_key]
+            
+            # Get bills for this month that this payee contributes to
+            current_date = date.fromisoformat(f"{month_key}-01")
+            if current_date.month == 12:
+                bill_month_date = date(current_date.year + 1, 1, 1)
+            else:
+                bill_month_date = date(current_date.year, current_date.month + 1, 1)
+            bill_month_key = bill_month_date.strftime('%Y-%m')
+            
+            # Display the BILL month name (what users expect to see)
+            month_display = bill_month_date.strftime('%B %Y')
+            
+            # Filter bills to only those this payee contributes to
+            all_bills_due = bill_breakdown_lookup.get(bill_month_key, [])
+            payee_bills = []
+            payee_total = 0.0
+            
+            # Load state to get bill assignments
+            from helpers.state_ops import load_state
+            state = load_state()
+            
+            for bill_due in all_bills_due:
+                # Find the bill in the state to check payee assignment
+                for bill in state.bills:
+                    if bill.name == bill_due.bill_name:
+                        if bill.has_custom_shares():
+                            # Use custom percentage if assigned
+                            payee_percentage = bill.get_payee_percentage(payee_name)
+                            if payee_percentage > 0:
+                                payee_amount = bill_due.amount * (payee_percentage / 100.0)
+                                payee_bills.append((bill_due.bill_name, payee_amount))
+                                payee_total += payee_amount
+                        else:
+                            # Equal split among all payees
+                            num_payees = len(state.payees)
+                            if num_payees > 0:
+                                payee_amount = bill_due.amount / num_payees
+                                payee_bills.append((bill_due.bill_name, payee_amount))
+                                payee_total += payee_amount
+                        break
+            
+            # Calculate row requirements
+            bills_rows = len(payee_bills) + 1 if payee_bills else 1  # individual bills + TOTAL
+            income_detail_rows = 4  # Payment Dates, Required, Percentage + TOTAL (removed Income Amount)
+            max_rows = max(bills_rows, income_detail_rows)
+            
+            # Create bills section data
+            bills_section = []
+            if payee_bills:
+                for bill_name, payee_amount in payee_bills:
+                    bills_section.append((bill_name, self.formatter.format_currency(payee_amount)))
+                bills_section.append(("TOTAL", self.formatter.format_currency(payee_total)))
+            else:
+                bills_section.append(("No bills due", ""))
+            
+            # Pad bills section to max_rows
+            while len(bills_section) < max_rows:
+                bills_section.append(("", ""))
+            
+            # Create income detail section data
+            income_details = []
+            
+            # 1. Payment Dates
+            income_row = ["Payment Dates"]
+            for schedule in all_schedules:
+                if schedule in month_data:
+                    items = month_data[schedule]
+                    dates = [self.formatter.format_date_short(item.payment_date) for item in items]
+                    income_row.append(", ".join(dates))
+                else:
+                    adjustment = self._find_weekend_adjustment(weekend_adj_lookup, f"{payee_name} - {schedule}", month_key)
+                    if adjustment:
+                        income_row.append(f"→{self.formatter.format_date_short(adjustment.adjusted_date)}")
+                    else:
+                        income_row.append("-")
+            income_details.append(income_row)
+            
+            # 2. Required
+            income_row = ["Required"]
+            for schedule in all_schedules:
+                if schedule in month_data:
+                    items = month_data[schedule]
+                    amounts = [self.formatter.format_currency(item.required_contribution) for item in items]
+                    income_row.append(", ".join(amounts))
+                else:
+                    adjustment = self._find_weekend_adjustment(weekend_adj_lookup, f"{payee_name} - {schedule}", month_key)
+                    if adjustment:
+                        income_row.append("→Moved")
+                    else:
+                        income_row.append("-")
+            income_details.append(income_row)
+            
+            # 3. Percentage
+            income_row = ["Percentage"]
+            for schedule in all_schedules:
+                if schedule in month_data:
+                    items = month_data[schedule]
+                    percentages = [self.formatter.format_percentage(item.contribution_percentage) for item in items]
+                    income_row.append(", ".join(percentages))
+                else:
+                    adjustment = self._find_weekend_adjustment(weekend_adj_lookup, f"{payee_name} - {schedule}", month_key)
+                    if adjustment:
+                        income_row.append("→Next")
+                    else:
+                        income_row.append("-")
+            income_details.append(income_row)
+            
+            # 4. TOTAL row
+            income_row = ["[blue]TOTAL[/blue]"]
+            total_required = 0.0
+            for schedule in all_schedules:
+                if schedule in month_data:
+                    items = month_data[schedule]
+                    schedule_total = sum(item.required_contribution for item in items)
+                    total_required += schedule_total
+            
+            # Show total only in first column, empty for others
+            for i, schedule in enumerate(all_schedules):
+                if i == 0:
+                    income_row.append(f"[blue]{self.formatter.format_currency(total_required)}[/blue]")
+                else:
+                    income_row.append("")
+            
+            income_details.append(income_row)
+            
+            # Pad income details to max_rows
+            while len(income_details) < max_rows:
+                empty_row = [""] + [""] * len(all_schedules)
+                income_details.append(empty_row)
+            
+            # Create the actual table rows by combining both sections
+            for i in range(max_rows):
+                # Month column (only show in first row)
+                month_col = month_display if i == 0 else ""
+                
+                # Bills columns
+                bill_name, bill_amount = bills_section[i]
+                
+                # Detail column + income columns
+                detail_and_income = income_details[i]
+                
+                # Combine all columns: Month | Bills | Bill Amounts | Detail | Income...
+                row = [month_col, bill_name, bill_amount] + detail_and_income
+                
+                # Apply styling for specific rows
+                style = None
+                if bill_name == "TOTAL":
+                    style = "bold blue"
+                elif "[blue]TOTAL[/blue]" in str(detail_and_income[0]) and bill_name == "":
+                    style = "bold"
+                elif detail_and_income[0] == "Required" and bill_name == "":
+                    style = "bold"
+                elif detail_and_income[0] == "Percentage" and bill_name == "":
+                    style = "dim"
+                    
+                table.add_row(*row, style=style)
             
             # Add separator between months
             if month_key != display_months[-1]:

@@ -2,7 +2,6 @@ from datetime import date, timedelta
 from typing import List, Tuple
 from dataclasses import dataclass
 from models.state_file import StateFile
-from models.bill import Bill
 from models.payee import Payee, PaySchedule
 
 @dataclass
@@ -16,10 +15,18 @@ class PaymentScheduleItem:
     is_before_cutoff: bool
 
 @dataclass
+class BillDue:
+    """Represents a bill due in a specific month."""
+    bill_name: str
+    amount: float
+    due_date: date
+
+@dataclass
 class MonthlyBillTotal:
     month: int
     year: int
     total_bills: float
+    bills_due: List[BillDue]
 
 @dataclass 
 class WeekendAdjustment:
@@ -92,7 +99,7 @@ class CashFlowScheduler:
         weekend_adjustments = self.check_for_weekend_adjusted_payments(payee, income_month, income_year)
         weekend_adjusted_shortfall = 0.0
         
-        for schedule, orig_date, adj_date in weekend_adjustments:
+        for schedule, orig_date, _ in weekend_adjustments:
             # If the payment was moved out of the income month, it creates a shortfall
             if orig_date.month == income_month and orig_date.year == income_year:
                 if schedule.contribution_percentage is not None:
@@ -339,15 +346,16 @@ class CashFlowScheduler:
         monthly_bill_totals = []
         weekend_adjustments = []
         
-        # Calculate for each month in the projection period
+        # Calculate for each month in the projection period (inclusive of months_ahead)
         for month_offset in range(months_ahead):
             current_month, current_year = self._adjust_month_year(start_month + month_offset, start_year)
             
             cutoff_date = self.schedule_options.get_cutoff_date(current_month, current_year)
             total_bills = self.calculate_monthly_bill_total(current_month, current_year)
+            bills_due = self._get_monthly_bills_breakdown(current_month, current_year)
             
-            # Store monthly bill total
-            monthly_bill_totals.append(MonthlyBillTotal(current_month, current_year, total_bills))
+            # Store monthly bill total with breakdown
+            monthly_bill_totals.append(MonthlyBillTotal(current_month, current_year, total_bills, bills_due))
             
             # Skip months with no bills (like setup months before the projection starts)
             if total_bills <= 0:
@@ -358,14 +366,17 @@ class CashFlowScheduler:
             income_month, income_year = self._adjust_month_year(current_month - 1, current_year)
             income_month_start, income_month_end = self._get_month_boundaries(income_month, income_year)
             
-            # Equal responsibility among payees
-            num_payees = len(self.state.payees)
-            if num_payees == 0:
+            # Calculate responsibility based on bill percentages
+            if len(self.state.payees) == 0:
                 continue
             
-            per_payee_responsibility = total_bills / num_payees
-            
             for payee in self.state.payees:
+                # Calculate this payee's responsibility based on bill percentages
+                per_payee_responsibility = self._calculate_payee_bill_responsibility(payee.name, current_month, current_year)
+                
+                # Skip payees with 0% responsibility
+                if per_payee_responsibility <= 0:
+                    continue
                 # Get all income during the previous month (which will be used to pay this month's bills)
                 income_during_previous_month = self.get_payee_income_in_month(payee, income_month_start, income_month_end)
                 
@@ -463,45 +474,79 @@ class CashFlowScheduler:
         
         return adjusted_payments
 
-def generate_payment_schedule(state_file_path: str, target_month: int, target_year: int, output_csv: str = None, display_table: bool = True) -> PaymentScheduleResult:
-    """
-    Main function to generate payment schedule from state file.
-    
-    Args:
-        state_file_path: Path to the YAML state file
-        target_month: Target month (1-12)
-        target_year: Target year
-        output_csv: Output CSV file path (optional)
-        display_table: Whether to display rich table (default True)
-    
-    Returns:
-        PaymentScheduleResult object containing all schedule data
-    """
-    from helpers.state_ops import load_state
-    
-    # Load state (assuming we'll modify load_state to accept file path)
-    import yaml
-    with open(state_file_path, 'r') as f:
-        data = yaml.safe_load(f)
-    
-    state = StateFile.from_dict(data)
-    
-    scheduler = CashFlowScheduler(state)
-    result = scheduler.calculate_proportional_contributions(
-        start_month=target_month, 
-        start_year=target_year, 
-        months_ahead=12
-    )
-    
-    if display_table:
-        from tui.payment_schedule_display import PaymentScheduleDisplay
-        from rich.console import Console
-        console = Console()
-        display = PaymentScheduleDisplay(console)
-        display.display_pivot_table(result)
-    
-    if output_csv:
-        from exporters.csv_exporter import CsvExporter
-        CsvExporter.export_payment_schedule(result, output_csv)
-    
-    return result
+    def _calculate_payee_bill_responsibility(self, payee_name: str, current_month: int, current_year: int) -> float:
+        """Calculate how much this payee is responsible for based on bill percentages."""
+        total_responsibility = 0.0
+        
+        for bill in self.state.bills:
+            if not bill.recurrence:
+                continue
+            
+            # Check if this bill is due in the current month
+            month_start, month_end = self._get_month_boundaries(current_month, current_year)
+            check_date = month_start - timedelta(days=1)
+            max_checks = 10
+            checks = 0
+            
+            while check_date <= month_end and checks < max_checks:
+                checks += 1
+                next_payment = bill.recurrence.next_due(check_date)
+                
+                if next_payment is None:
+                    break
+                
+                if next_payment <= month_end:
+                    # This bill is due this month
+                    if bill.has_custom_shares():
+                        # Use custom percentage
+                        percentage = bill.get_payee_percentage(payee_name)
+                        total_responsibility += bill.amount * (percentage / 100.0)
+                    else:
+                        # Use equal split among all active payees
+                        num_payees = len(self.state.payees)
+                        if num_payees > 0:
+                            total_responsibility += bill.amount / num_payees
+                    break
+                
+                check_date = next_payment
+        
+        return total_responsibility
+
+    def _get_monthly_bills_breakdown(self, target_month: int, target_year: int) -> List[BillDue]:
+        """Get a breakdown of which bills are due in the target month."""
+        bills_due = []
+        
+        if self._is_before_projection_start(target_month, target_year):
+            return bills_due
+            
+        month_start, month_end = self._get_month_boundaries(target_month, target_year)
+        
+        for bill in self.state.bills:
+            if not bill.recurrence:
+                continue
+                
+            # Check if this bill is due within the target month
+            check_date = month_start - timedelta(days=1)
+            max_checks = 10
+            checks = 0
+            
+            while check_date <= month_end and checks < max_checks:
+                checks += 1
+                next_payment = bill.recurrence.next_due(check_date)
+                
+                if next_payment is None:
+                    break
+                
+                if next_payment <= month_end:
+                    # This bill is due this month
+                    bills_due.append(BillDue(
+                        bill_name=bill.name,
+                        amount=bill.amount,
+                        due_date=next_payment
+                    ))
+                    break
+                
+                check_date = next_payment
+        
+        return bills_due
+

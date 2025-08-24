@@ -57,6 +57,9 @@ class Recurrence:
                 delta = timedelta(days=self.every)
             elif self.interval == 'weekly':
                 delta = timedelta(weeks=self.every)
+            elif self.interval == 'monthly':
+                # For monthly intervals, use precise month calculation instead of approximation
+                return self._calculate_monthly_interval(after)
             elif self.interval == 'quarterly':
                 # Approximate 3 months as 91 days
                 delta = timedelta(days=91 * self.every)
@@ -161,3 +164,35 @@ class Recurrence:
                 return None
             return next_date
         return None
+    
+    def _calculate_monthly_interval(self, after: Optional[date] = None) -> Optional[date]:
+        """Calculate next due date for monthly interval recurrence."""
+        base_date = after or date.today()
+        
+        # If the base date is before or on the start date, return start date
+        if base_date <= self.start:
+            return self.start
+        
+        # Calculate the next occurrence based on start date
+        current_date = self.start
+        while current_date <= base_date:
+            # Add the interval in months
+            month = current_date.month + self.every
+            year = current_date.year
+            day = current_date.day
+            
+            while month > 12:
+                month -= 12
+                year += 1
+            
+            try:
+                current_date = date(year, month, day)
+            except ValueError:
+                # Handle cases like Feb 31st by using last day of month
+                from calendar import monthrange
+                last_day = monthrange(year, month)[1]
+                current_date = date(year, month, last_day)
+        
+        if self.end and current_date > self.end:
+            return None
+        return current_date

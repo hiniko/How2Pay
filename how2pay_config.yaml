@@ -1,1 +1,7 @@
-active_state_file: test_state.yaml
+active_state_file: 11_tregelles_road_state.yaml
+locale:
+  currency_position: before
+  currency_symbol: "\xA3"
+  date_format: dd/mm/yyyy
+  decimal_separator: .
+  thousands_separator: ','
