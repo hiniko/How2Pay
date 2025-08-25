@@ -3,6 +3,8 @@ from typing import Dict, List
 from collections import defaultdict
 from rich.console import Console
 from rich.table import Table
+from rich.panel import Panel
+from rich.text import Text
 from scheduler.cash_flow import PaymentScheduleResult, WeekendAdjustment, BillDue
 from helpers.formatting import get_formatter
 from helpers.payee_colors import PayeeColorGenerator
@@ -28,15 +30,33 @@ class PaymentScheduleDisplay:
         
         return colors
     
-    def display_pivot_table(self, result: PaymentScheduleResult) -> None:
+    def _get_payee_colors_for_all_payees(self, all_payees: List) -> Dict[str, str]:
+        """Get Rich-compatible colors for all payees (including inactive ones)."""
+        colors = {}
+        for i, payee in enumerate(all_payees):
+            colors[payee.name] = self.color_generator.get_payee_color(i, 'rich')
+        return colors
+    
+    def display_pivot_table(self, result: PaymentScheduleResult, show_zero_contribution: bool = False, all_payees: List = None) -> None:
         """Display payment schedule as a rich pivot table."""
-        # Get payee colors
-        payee_colors = self._get_payee_colors(result)
+        # Get payee colors - include all payees from state if provided
+        if all_payees:
+            payee_colors = self._get_payee_colors_for_all_payees(all_payees)
+        else:
+            payee_colors = self._get_payee_colors(result)
+        
+        # Display min/max payment summary before the table
+        self._display_payment_summary(result, show_zero_contribution, payee_colors)
+        
+        # Filter schedule items based on contribution preference
+        filtered_items = result.schedule_items
+        if not show_zero_contribution:
+            filtered_items = [item for item in result.schedule_items if item.required_contribution > 0]
         
         # Group data by month and payee/schedule
         monthly_data = defaultdict(lambda: defaultdict(list))
         
-        for item in result.schedule_items:
+        for item in filtered_items:
             month_key = item.payment_date.strftime('%Y-%m')
             payee_schedule_key = f"{item.payee_name} - {item.schedule_description}"
             monthly_data[month_key][payee_schedule_key].append(item)
@@ -133,8 +153,10 @@ class PaymentScheduleDisplay:
                 bill_month_date = date(current_date.year, current_date.month + 1, 1)
             bill_month_key = bill_month_date.strftime('%Y-%m')
             
-            # Display the BILL month name (what users expect to see)
-            month_display = bill_month_date.strftime('%B %Y')
+            # Display both income month → bill month relationship for clarity
+            income_month_display = current_date.strftime('%B')
+            bill_month_display = bill_month_date.strftime('%B %Y')
+            month_display = f"{income_month_display} → {bill_month_display}"
             
             # Get the bills that this income is responsible for
             bills_due = bill_breakdown_lookup.get(bill_month_key, [])
@@ -142,7 +164,7 @@ class PaymentScheduleDisplay:
             
             # Calculate row requirements for both sections
             bills_rows = len(bills_due) + 1 if bills_due else 1  # individual bills + TOTAL (or just "No bills")
-            payee_detail_rows = 4  # Payment Dates, Required, Percentage + TOTAL (removed Income Amount)
+            payee_detail_rows = 2  # Payment Dates + TOTAL (removed Income Amount, Percentage, and Required)
             max_rows = max(bills_rows, payee_detail_rows)
             
             # Create bills section data
@@ -176,37 +198,7 @@ class PaymentScheduleDisplay:
                         payee_row.append("-")
             payee_details.append(payee_row)
             
-            # 2. Required
-            payee_row = ["Required"]
-            for payee_schedule in all_payee_schedules:
-                if payee_schedule in month_data:
-                    items = month_data[payee_schedule]
-                    amounts = [self.formatter.format_currency(item.required_contribution) for item in items]
-                    payee_row.append(", ".join(amounts))
-                else:
-                    adjustment = self._find_weekend_adjustment(weekend_adj_lookup, payee_schedule, month_key)
-                    if adjustment:
-                        payee_row.append("→Moved")
-                    else:
-                        payee_row.append("-")
-            payee_details.append(payee_row)
-            
-            # 3. Percentage
-            payee_row = ["Percentage"]
-            for payee_schedule in all_payee_schedules:
-                if payee_schedule in month_data:
-                    items = month_data[payee_schedule]
-                    percentages = [self.formatter.format_percentage(item.contribution_percentage) for item in items]
-                    payee_row.append(", ".join(percentages))
-                else:
-                    adjustment = self._find_weekend_adjustment(weekend_adj_lookup, payee_schedule, month_key)
-                    if adjustment:
-                        payee_row.append("→Next")
-                    else:
-                        payee_row.append("-")
-            payee_details.append(payee_row)
-            
-            # 4. TOTAL row for payee section - sum by payee, not by schedule
+            # 2. TOTAL row for payee section - sum by payee, not by schedule
             payee_row = ["[blue]TOTAL[/blue]"]
             payee_totals = defaultdict(float)
             
@@ -259,12 +251,6 @@ class PaymentScheduleDisplay:
                 elif "[blue]TOTAL[/blue]" in str(detail_and_payees[0]) and bill_name == "":
                     # TOTAL row for payee section - already has blue markup in the detail column
                     style = "bold"
-                elif detail_and_payees[0] == "Required" and bill_name == "":
-                    # Only apply bold to payee detail rows, not bill rows
-                    style = "bold"
-                elif detail_and_payees[0] == "Percentage" and bill_name == "":
-                    # Only apply dim to payee detail rows, not bill rows  
-                    style = "dim"
                     
                 table.add_row(*row, style=style)
             
@@ -274,13 +260,137 @@ class PaymentScheduleDisplay:
         
         self.console.print(table)
     
-    def display_payee_schedule(self, result: PaymentScheduleResult, payee_name: str) -> None:
+    def _display_payment_summary(self, result: PaymentScheduleResult, show_zero_contribution: bool, payee_colors: Dict[str, str]) -> None:
+        """Display min/max payment summary for each payee."""
+        # Filter schedule items based on contribution preference
+        filtered_items = result.schedule_items
+        if not show_zero_contribution:
+            filtered_items = [item for item in result.schedule_items if item.required_contribution > 0]
+        
+        # Group by payee and month to calculate monthly totals
+        payee_monthly_totals = defaultdict(lambda: defaultdict(float))
+        
+        for item in filtered_items:
+            month_key = item.payment_date.strftime('%Y-%m')
+            payee_monthly_totals[item.payee_name][month_key] += item.required_contribution
+        
+        if not payee_monthly_totals:
+            return
+        
+        # Calculate min/max for each payee
+        payee_summary = {}
+        for payee_name, monthly_totals in payee_monthly_totals.items():
+            if monthly_totals:
+                min_amount = min(monthly_totals.values())
+                max_amount = max(monthly_totals.values())
+                
+                # Find months for min/max amounts
+                min_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
+                             for month, amount in monthly_totals.items() if amount == min_amount]
+                max_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
+                             for month, amount in monthly_totals.items() if amount == max_amount]
+                
+                payee_summary[payee_name] = {
+                    'min_amount': min_amount,
+                    'max_amount': max_amount,
+                    'min_months': min_months[:2],  # Limit to first 2 months to avoid clutter
+                    'max_months': max_months[:2]
+                }
+        
+        # Create summary text
+        summary_lines = []
+        summary_lines.append("[bold]Payment Range Summary[/bold]\n")
+        
+        for payee_name in sorted(payee_summary.keys()):
+            summary = payee_summary[payee_name]
+            color = payee_colors.get(payee_name, "#ffffff")
+            
+            min_amount_str = self.formatter.format_currency(summary['min_amount'])
+            max_amount_str = self.formatter.format_currency(summary['max_amount'])
+            
+            min_months_str = ", ".join(summary['min_months'])
+            max_months_str = ", ".join(summary['max_months'])
+            
+            if summary['min_amount'] == summary['max_amount']:
+                # Same amount every month
+                line = f"[{color}]{payee_name}[/{color}]: {max_amount_str} (consistent)"
+            else:
+                line = f"[{color}]{payee_name}[/{color}]: {min_amount_str} - {max_amount_str}"
+                line += f" (min: {min_months_str}, max: {max_months_str})"
+            
+            summary_lines.append(line)
+        
+        # Display the summary in a panel
+        summary_text = "\n".join(summary_lines)
+        panel = Panel(summary_text, title="💰 Payment Planning", border_style="blue")
+        self.console.print(panel)
+        self.console.print()  # Add spacing before table
+    
+    def _display_payee_payment_summary(self, payee_items: List, payee_name: str, payee_colors: Dict[str, str]) -> None:
+        """Display min/max payment summary for a specific payee."""
+        if not payee_items:
+            return
+        
+        # Group by month to calculate monthly totals for this payee
+        monthly_totals = defaultdict(float)
+        
+        for item in payee_items:
+            month_key = item.payment_date.strftime('%Y-%m')
+            monthly_totals[month_key] += item.required_contribution
+        
+        if not monthly_totals:
+            return
+        
+        # Calculate min/max for this payee
+        min_amount = min(monthly_totals.values())
+        max_amount = max(monthly_totals.values())
+        
+        # Find months for min/max amounts
+        min_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
+                     for month, amount in monthly_totals.items() if amount == min_amount]
+        max_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
+                     for month, amount in monthly_totals.items() if amount == max_amount]
+        
+        # Create summary text
+        color = payee_colors.get(payee_name, "#ffffff")
+        min_amount_str = self.formatter.format_currency(min_amount)
+        max_amount_str = self.formatter.format_currency(max_amount)
+        
+        min_months_str = ", ".join(min_months[:2])  # Limit to first 2 months
+        max_months_str = ", ".join(max_months[:2])
+        
+        summary_lines = []
+        summary_lines.append(f"[bold]Payment Range for [{color}]{payee_name}[/{color}][/bold]\n")
+        
+        if min_amount == max_amount:
+            # Same amount every month
+            line = f"[{color}]{max_amount_str}[/{color}] (consistent across all months)"
+        else:
+            line = f"[{color}]{min_amount_str} - {max_amount_str}[/{color}]"
+            line += f" (min: {min_months_str}, max: {max_months_str})"
+        
+        summary_lines.append(line)
+        
+        # Display the summary in a panel
+        summary_text = "\n".join(summary_lines)
+        panel = Panel(summary_text, title="💰 Payment Planning", border_style="blue")
+        self.console.print(panel)
+        self.console.print()  # Add spacing before table
+    
+    def display_payee_schedule(self, result: PaymentScheduleResult, payee_name: str, show_zero_contribution: bool = False) -> None:
         """Display payment schedule for a specific payee only."""
         # Get payee colors
         payee_colors = self._get_payee_colors(result)
         
         # Filter schedule items for this payee
         payee_items = [item for item in result.schedule_items if item.payee_name == payee_name]
+        
+        # Further filter by contribution if requested
+        if not show_zero_contribution:
+            payee_items = [item for item in payee_items if item.required_contribution > 0]
+        
+        # Display payment summary for this specific payee
+        self._display_payee_payment_summary(payee_items, payee_name, payee_colors)
         
         if not payee_items:
             self.console.print(f"[yellow]No schedule items found for payee '{payee_name}'[/yellow]")
@@ -371,8 +481,10 @@ class PaymentScheduleDisplay:
                 bill_month_date = date(current_date.year, current_date.month + 1, 1)
             bill_month_key = bill_month_date.strftime('%Y-%m')
             
-            # Display the BILL month name (what users expect to see)
-            month_display = bill_month_date.strftime('%B %Y')
+            # Display both income month → bill month relationship for clarity
+            income_month_display = current_date.strftime('%B')
+            bill_month_display = bill_month_date.strftime('%B %Y')
+            month_display = f"{income_month_display} → {bill_month_display}"
             
             # Filter bills to only those this payee contributes to
             all_bills_due = bill_breakdown_lookup.get(bill_month_key, [])
@@ -405,7 +517,7 @@ class PaymentScheduleDisplay:
             
             # Calculate row requirements
             bills_rows = len(payee_bills) + 1 if payee_bills else 1  # individual bills + TOTAL
-            income_detail_rows = 4  # Payment Dates, Required, Percentage + TOTAL (removed Income Amount)
+            income_detail_rows = 2  # Payment Dates + TOTAL (removed Income Amount, Percentage, and Required)
             max_rows = max(bills_rows, income_detail_rows)
             
             # Create bills section data
@@ -439,37 +551,7 @@ class PaymentScheduleDisplay:
                         income_row.append("-")
             income_details.append(income_row)
             
-            # 2. Required
-            income_row = ["Required"]
-            for schedule in all_schedules:
-                if schedule in month_data:
-                    items = month_data[schedule]
-                    amounts = [self.formatter.format_currency(item.required_contribution) for item in items]
-                    income_row.append(", ".join(amounts))
-                else:
-                    adjustment = self._find_weekend_adjustment(weekend_adj_lookup, f"{payee_name} - {schedule}", month_key)
-                    if adjustment:
-                        income_row.append("→Moved")
-                    else:
-                        income_row.append("-")
-            income_details.append(income_row)
-            
-            # 3. Percentage
-            income_row = ["Percentage"]
-            for schedule in all_schedules:
-                if schedule in month_data:
-                    items = month_data[schedule]
-                    percentages = [self.formatter.format_percentage(item.contribution_percentage) for item in items]
-                    income_row.append(", ".join(percentages))
-                else:
-                    adjustment = self._find_weekend_adjustment(weekend_adj_lookup, f"{payee_name} - {schedule}", month_key)
-                    if adjustment:
-                        income_row.append("→Next")
-                    else:
-                        income_row.append("-")
-            income_details.append(income_row)
-            
-            # 4. TOTAL row
+            # 2. TOTAL row
             income_row = ["[blue]TOTAL[/blue]"]
             total_required = 0.0
             for schedule in all_schedules:
@@ -512,10 +594,6 @@ class PaymentScheduleDisplay:
                     style = "bold blue"
                 elif "[blue]TOTAL[/blue]" in str(detail_and_income[0]) and bill_name == "":
                     style = "bold"
-                elif detail_and_income[0] == "Required" and bill_name == "":
-                    style = "bold"
-                elif detail_and_income[0] == "Percentage" and bill_name == "":
-                    style = "dim"
                     
                 table.add_row(*row, style=style)
             

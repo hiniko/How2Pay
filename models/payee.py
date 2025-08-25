@@ -1,4 +1,5 @@
 from typing import Optional, List, Literal
+from datetime import date
 from models.recurrence import Recurrence
 
 class PaySchedule:
@@ -64,10 +65,12 @@ class Payee:
         name: str,
         pay_schedules: Optional[List[PaySchedule]] = None,
         description: Optional[str] = None,
+        start_date: Optional[date] = None,
     ):
         self.name = name
         self.pay_schedules = pay_schedules or []
         self.description = description
+        self.start_date = start_date  # Date when payee starts contributing to bills
 
     @staticmethod
     def from_dict(data: dict) -> 'Payee':
@@ -75,15 +78,50 @@ class Payee:
         schedules_data = data.get('pay_schedules', [])
         for schedule_data in schedules_data:
             pay_schedules.append(PaySchedule.from_dict(schedule_data))
+            
+        # Parse start_date if provided
+        start_date = None
+        start_date_str = data.get('start_date')
+        if start_date_str:
+            if isinstance(start_date_str, str):
+                start_date = date.fromisoformat(start_date_str)
+            elif isinstance(start_date_str, date):
+                start_date = start_date_str
+                
         return Payee(
             name=data.get('name'),
             pay_schedules=pay_schedules,
-            description=data.get('description')
+            description=data.get('description'),
+            start_date=start_date
         )
 
     def to_dict(self) -> dict:
-        return {
+        result = {
             'name': self.name,
             'pay_schedules': [schedule.to_dict() for schedule in self.pay_schedules],
             'description': self.description
         }
+        if self.start_date:
+            result['start_date'] = self.start_date.isoformat()
+        return result
+    
+    def is_active_for_month(self, target_year: int, target_month: int) -> bool:
+        """
+        Check if payee is active (contributing to bills) for the given month.
+        
+        Args:
+            target_year: Year to check
+            target_month: Month to check (1-12)
+            
+        Returns:
+            bool: True if payee should contribute to bills in this month
+        """
+        # If no start date is set, payee is always active
+        if not self.start_date:
+            return True
+            
+        # Create date for the first day of the target month
+        target_month_start = date(target_year, target_month, 1)
+        
+        # Payee is active if their start date is on or before the target month
+        return self.start_date <= target_month_start

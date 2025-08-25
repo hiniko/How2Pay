@@ -50,7 +50,8 @@ def main_callback(
     version: Optional[bool] = typer.Option(None, "--version", "-v", callback=version_callback, help="Show version and exit")
 ):
     """Entry point for the how2pay command."""
-    pass
+    # version parameter is handled by typer callback mechanism
+    _ = version  # Suppress unused variable warning
 
 def main():
     """Entry point for setuptools and command line."""

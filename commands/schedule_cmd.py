@@ -24,7 +24,8 @@ def show(
     start_month: Optional[int] = typer.Option(None, "--start-month", help="Starting month (1-12)"),
     start_year: Optional[int] = typer.Option(None, "--start-year", help="Starting year"),
     export_csv: Optional[str] = typer.Option(None, "--export", help="Export to CSV file"),
-    export_pdf: Optional[str] = typer.Option(None, "--pdf", help="Export to PDF file")
+    export_pdf: bool = typer.Option(False, "--pdf", help="Export to PDF file (auto-generates filename)"),
+    show_zero_contribution: bool = typer.Option(False, "--show-zero", help="Show income streams with 0% contribution")
 ) -> None:
     """Show cash flow projection schedule."""
     state: StateFile = load_state()
@@ -67,7 +68,7 @@ def show(
     
     # Display the table
     display = PaymentScheduleDisplay(console)
-    display.display_pivot_table(result)
+    display.display_pivot_table(result, show_zero_contribution)
     
     # Export if requested
     if export_csv:
@@ -77,14 +78,119 @@ def show(
     if export_pdf:
         try:
             from exporters.pdf_exporter import PdfExporter
+            from helpers.config_ops import get_active_state_file
+            import os
+            
+            # Generate filename from state file name
+            state_filename = get_active_state_file()
+            base_name = os.path.splitext(os.path.basename(state_filename))[0]
+            pdf_filename = f"{base_name}.pdf"
             
             # Use the unified PDF export (household schedule)
             PdfExporter.export_schedule_to_pdf(
                 result=result,
-                output_path=export_pdf,
-                payee_name=None  # None means household schedule
+                output_path=pdf_filename,
+                payee_name=None,  # None means household schedule
+                show_zero_contribution=show_zero_contribution
             )
-            console.print(f"\n[green]Exported professional PDF to {export_pdf}[/green]")
+            console.print(f"\n[green]Exported professional PDF to {pdf_filename}[/green]")
+            
+        except ImportError as e:
+            console.print(f"\n[red]PDF export failed: {e}[/red]")
+            console.print("[yellow]Install PDF dependencies with: pip install -e '.[pdf]'[/yellow]")
+
+@app.command()
+def payee(
+    payee_name: str = typer.Argument(..., help="Name of the payee to show schedule for"),
+    months: Optional[int] = typer.Option(None, "--months", "-m", help="Number of months to project"),
+    start_month: Optional[int] = typer.Option(None, "--start-month", help="Starting month (1-12)"),
+    start_year: Optional[int] = typer.Option(None, "--start-year", help="Starting year"),
+    export_pdf: bool = typer.Option(False, "--pdf", help="Export to PDF file (auto-generates filename)"),
+    show_zero_contribution: bool = typer.Option(False, "--show-zero", help="Show income streams with 0% contribution")
+) -> None:
+    """Show payment schedule for a specific payee."""
+    state: StateFile = load_state()
+    
+    # Check if payee exists
+    payee = None
+    for p in state.payees:
+        if p.name.lower() == payee_name.lower():
+            payee = p
+            payee_name = p.name  # Use exact case from state
+            break
+    
+    if not payee:
+        console.print(f"[red]Payee '{payee_name}' not found.[/red]")
+        console.print("Available payees:")
+        for p in state.payees:
+            console.print(f"  • {p.name}")
+        return
+    
+    # Use defaults if not specified
+    projection_months = months or state.schedule_options.default_projection_months
+    current_date = date.today()
+    target_month = start_month or current_date.month
+    target_year = start_year or current_date.year
+    
+    # Validate inputs
+    try:
+        target_month = validate_month(target_month)
+        target_year = validate_year(target_year)
+        projection_months = validate_projection_months(projection_months)
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        return
+    
+    # Check if we have any data
+    if not state.bills and not state.payees:
+        console.print("[yellow]No bills or payees configured. Use 'how2pay bills add' and 'how2pay payees add' to get started.[/yellow]")
+        return
+    
+    console.print(f"[bold]Generating {projection_months}-month schedule for {payee_name} starting {target_month}/{target_year}[/bold]")
+    console.print(f"Bills: {len(state.bills)}, Income streams: {len(payee.pay_schedules)}")
+    console.print("")
+    
+    # Create scheduler and generate projection
+    from scheduler.cash_flow import CashFlowScheduler
+    from tui.payment_schedule_display import PaymentScheduleDisplay
+    
+    scheduler = CashFlowScheduler(state)
+    result = scheduler.calculate_proportional_contributions(
+        start_month=target_month,
+        start_year=target_year,
+        months_ahead=projection_months
+    )
+    
+    if not result.schedule_items:
+        console.print("[yellow]No schedule items generated. Check your bill and payee configurations.[/yellow]")
+        return
+    
+    # Display the payee-specific table
+    display = PaymentScheduleDisplay(console)
+    display.display_payee_schedule(result, payee_name, show_zero_contribution)
+    
+    # Export to PDF if requested
+    if export_pdf:
+        try:
+            from exporters.pdf_exporter import PdfExporter
+            from helpers.config_ops import get_active_state_file
+            import os
+            
+            # Generate filename from state file name and payee name
+            state_filename = get_active_state_file()
+            base_name = os.path.splitext(os.path.basename(state_filename))[0]
+            # Clean payee name for filename (replace spaces and special characters)
+            clean_payee_name = payee_name.replace(' ', '_').replace('/', '_').replace('\\', '_')
+            pdf_filename = f"{base_name}-{clean_payee_name}.pdf"
+            
+            # Use the unified PDF export (payee-specific schedule)
+            PdfExporter.export_schedule_to_pdf(
+                result=result,
+                output_path=pdf_filename,
+                payee_name=payee_name,  # Providing payee_name means payee-specific schedule
+                show_zero_contribution=show_zero_contribution
+            )
+            console.print(f"\n[green]Exported professional PDF to {pdf_filename}[/green]")
             
         except ImportError as e:
             console.print(f"\n[red]PDF export failed: {e}[/red]")

@@ -132,28 +132,48 @@ class CashFlowScheduler:
                                            weekend_adjusted_shortfall: float) -> Tuple[List[PaymentScheduleItem], float, List[Tuple[PaySchedule, date]]]:
         """Process schedules with custom contribution percentages."""
         schedule_items = []
-        total_custom_bill_percentage = 0.0
         remaining_schedules = []
         
+        # Separate custom percentage schedules from others
+        custom_schedules = []
         for schedule, payment_date in income_schedules:
             if schedule.contribution_percentage is not None:
-                # Use custom percentage OF THE BILLS (not of income)
-                base_contribution = per_payee_responsibility * (schedule.contribution_percentage / 100)
-                
-                # Add proportional share of weekend adjustment shortfall
-                weekend_adjustment_share = 0.0
-                if weekend_adjusted_shortfall > 0 and total_income > 0:
-                    income_proportion = schedule.amount / total_income
-                    weekend_adjustment_share = weekend_adjusted_shortfall * income_proportion
-                
-                required_contribution = base_contribution + weekend_adjustment_share
-                total_custom_bill_percentage += schedule.contribution_percentage
-                
-                schedule_items.append(self._create_schedule_item(payee.name, schedule, payment_date, required_contribution))
+                custom_schedules.append((schedule, payment_date))
             else:
                 remaining_schedules.append((schedule, payment_date))
         
-        return schedule_items, total_custom_bill_percentage, remaining_schedules
+        if not custom_schedules:
+            return schedule_items, 0.0, remaining_schedules
+        
+        # Calculate total percentage and normalize if needed
+        total_custom_percentage = sum(schedule.contribution_percentage for schedule, _ in custom_schedules)
+        
+        # Calculate the total bill amount that custom percentages should cover
+        total_custom_bill_amount = per_payee_responsibility * min(total_custom_percentage / 100, 1.0)
+        
+        # Distribute the bill amount proportionally among custom schedules based on their percentages
+        for schedule, payment_date in custom_schedules:
+            if total_custom_percentage > 0:
+                # Normalize the percentage if total > 100%
+                normalized_percentage = schedule.contribution_percentage / total_custom_percentage
+                base_contribution = total_custom_bill_amount * normalized_percentage
+            else:
+                base_contribution = 0.0
+            
+            # Add proportional share of weekend adjustment shortfall
+            weekend_adjustment_share = 0.0
+            if weekend_adjusted_shortfall > 0 and total_income > 0:
+                income_proportion = schedule.amount / total_income
+                weekend_adjustment_share = weekend_adjusted_shortfall * income_proportion
+            
+            required_contribution = base_contribution + weekend_adjustment_share
+            
+            schedule_items.append(self._create_schedule_item(payee.name, schedule, payment_date, required_contribution))
+        
+        # Return the actual percentage used (capped at 100%)
+        actual_custom_bill_percentage = min(total_custom_percentage, 100.0)
+        
+        return schedule_items, actual_custom_bill_percentage, remaining_schedules
     
     def _process_remaining_schedules(self, payee: Payee, remaining_schedules: List[Tuple[PaySchedule, date]], 
                                    per_payee_responsibility: float, remaining_bill_percentage: float, 
@@ -229,7 +249,9 @@ class CashFlowScheduler:
         total = 0.0
         
         for bill in self.state.bills:
-            if not bill.recurrence:
+            # Get price info for the target month to determine recurrence
+            price_info = bill.get_price_info_for_date(month_start)
+            if not price_info or not price_info.recurrence:
                 continue
                 
             # Check if this bill is due within the target month
@@ -238,7 +260,7 @@ class CashFlowScheduler:
             max_checks = 10  # Reasonable limit for checking multiple occurrences
             
             for _ in range(max_checks):
-                next_payment = bill.recurrence.next_due(check_date)
+                next_payment = price_info.recurrence.next_due(check_date)
                 
                 if not next_payment:
                     break
@@ -249,7 +271,10 @@ class CashFlowScheduler:
                 
                 # If the payment is within our target month, count it
                 if next_payment >= month_start and next_payment <= month_end:
-                    total += bill.amount
+                    # Get the amount for the actual payment date (in case prices changed mid-month)
+                    payment_price_info = bill.get_price_info_for_date(next_payment)
+                    if payment_price_info:
+                        total += payment_price_info.amount
                 
                 # Move to the next potential date (past current payment to find next occurrence)
                 check_date = next_payment + timedelta(days=1)
@@ -371,6 +396,10 @@ class CashFlowScheduler:
                 continue
             
             for payee in self.state.payees:
+                # Skip payees who haven't started contributing yet
+                if not payee.is_active_for_month(current_year, current_month):
+                    continue
+                    
                 # Calculate this payee's responsibility based on bill percentages
                 per_payee_responsibility = self._calculate_payee_bill_responsibility(payee.name, current_month, current_year)
                 
@@ -479,33 +508,40 @@ class CashFlowScheduler:
         total_responsibility = 0.0
         
         for bill in self.state.bills:
-            if not bill.recurrence:
+            # Get price info for the target month to determine recurrence
+            month_start, month_end = self._get_month_boundaries(current_month, current_year)
+            price_info = bill.get_price_info_for_date(month_start)
+            if not price_info or not price_info.recurrence:
                 continue
             
             # Check if this bill is due in the current month
-            month_start, month_end = self._get_month_boundaries(current_month, current_year)
             check_date = month_start - timedelta(days=1)
             max_checks = 10
             checks = 0
             
             while check_date <= month_end and checks < max_checks:
                 checks += 1
-                next_payment = bill.recurrence.next_due(check_date)
+                next_payment = price_info.recurrence.next_due(check_date)
                 
                 if next_payment is None:
                     break
                 
                 if next_payment <= month_end:
                     # This bill is due this month
+                    # Get the amount for the actual payment date (in case prices changed mid-month)
+                    payment_price_info = bill.get_price_info_for_date(next_payment)
+                    if not payment_price_info:
+                        break
+                    
                     if bill.has_custom_shares():
                         # Use custom percentage
                         percentage = bill.get_payee_percentage(payee_name)
-                        total_responsibility += bill.amount * (percentage / 100.0)
+                        total_responsibility += payment_price_info.amount * (percentage / 100.0)
                     else:
                         # Use equal split among all active payees
-                        num_payees = len(self.state.payees)
-                        if num_payees > 0:
-                            total_responsibility += bill.amount / num_payees
+                        num_active_payees = sum(1 for p in self.state.payees if p.is_active_for_month(current_year, current_month))
+                        if num_active_payees > 0:
+                            total_responsibility += payment_price_info.amount / num_active_payees
                     break
                 
                 check_date = next_payment
@@ -522,7 +558,9 @@ class CashFlowScheduler:
         month_start, month_end = self._get_month_boundaries(target_month, target_year)
         
         for bill in self.state.bills:
-            if not bill.recurrence:
+            # Get price info for the target month to determine recurrence
+            price_info = bill.get_price_info_for_date(month_start)
+            if not price_info or not price_info.recurrence:
                 continue
                 
             # Check if this bill is due within the target month
@@ -532,18 +570,21 @@ class CashFlowScheduler:
             
             while check_date <= month_end and checks < max_checks:
                 checks += 1
-                next_payment = bill.recurrence.next_due(check_date)
+                next_payment = price_info.recurrence.next_due(check_date)
                 
                 if next_payment is None:
                     break
                 
                 if next_payment <= month_end:
                     # This bill is due this month
-                    bills_due.append(BillDue(
-                        bill_name=bill.name,
-                        amount=bill.amount,
-                        due_date=next_payment
-                    ))
+                    # Get the amount for the actual payment date (in case prices changed mid-month)
+                    payment_price_info = bill.get_price_info_for_date(next_payment)
+                    if payment_price_info:
+                        bills_due.append(BillDue(
+                            bill_name=bill.name,
+                            amount=payment_price_info.amount,
+                            due_date=next_payment
+                        ))
                     break
                 
                 check_date = next_payment

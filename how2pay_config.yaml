@@ -1,4 +1,4 @@
-active_state_file: 11_tregelles_road_state.yaml
+active_state_file: 11_tregelles_road.yaml
 locale:
   currency_position: before
   currency_symbol: "\xA3"

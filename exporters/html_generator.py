@@ -27,11 +27,15 @@ class ProfessionalHtmlGenerator:
         
         return colors
     
-    def generate_payee_schedule_html(self, result: PaymentScheduleResult, payee_name: str) -> str:
+    def generate_payee_schedule_html(self, result: PaymentScheduleResult, payee_name: str, show_zero_contribution: bool = False) -> str:
         """Generate professional HTML for payee-specific schedule."""
         
         # Filter schedule items for this payee
         payee_items = [item for item in result.schedule_items if item.payee_name == payee_name]
+        
+        # Further filter by contribution if requested
+        if not show_zero_contribution:
+            payee_items = [item for item in payee_items if item.required_contribution > 0]
         
         if not payee_items:
             return self._generate_no_data_html(f"No schedule items found for payee '{payee_name}'")
@@ -53,6 +57,9 @@ class ProfessionalHtmlGenerator:
             all_schedules.update(month_data.keys())
         all_schedules = sorted(all_schedules)
         
+        # Generate payee-specific payment summary
+        summary_html = self._generate_payee_payment_summary_html(payee_items, payee_name)
+        
         # Generate HTML
         html = self._get_base_html_template(
             title=f"{result.months_ahead}-Month Payment Schedule for {payee_name}",
@@ -65,14 +72,22 @@ class ProfessionalHtmlGenerator:
             monthly_data, bill_breakdown_lookup, payee_name, all_schedules, result
         )
         
-        return html.replace("PLACEHOLDER_CONTENT", table_html)
+        # Combine summary and table
+        content_html = summary_html + table_html
+        
+        return html.replace("PLACEHOLDER_CONTENT", content_html)
     
-    def generate_household_schedule_html(self, result: PaymentScheduleResult) -> str:
+    def generate_household_schedule_html(self, result: PaymentScheduleResult, show_zero_contribution: bool = False) -> str:
         """Generate professional HTML for full household schedule."""
+        
+        # Filter schedule items based on contribution preference
+        filtered_items = result.schedule_items
+        if not show_zero_contribution:
+            filtered_items = [item for item in result.schedule_items if item.required_contribution > 0]
         
         # Group data by month and payee/schedule
         monthly_data = defaultdict(lambda: defaultdict(list))
-        for item in result.schedule_items:
+        for item in filtered_items:
             month_key = item.payment_date.strftime('%Y-%m')
             payee_schedule_key = f"{item.payee_name} - {item.schedule_description}"
             monthly_data[month_key][payee_schedule_key].append(item)
@@ -101,12 +116,18 @@ class ProfessionalHtmlGenerator:
             result=result
         )
         
+        # Generate payment summary
+        summary_html = self._generate_payment_summary_html(filtered_items)
+        
         # Generate table
         table_html = self._generate_household_table(
             monthly_data, bill_breakdown_lookup, payee_schedules, all_payee_schedules, result
         )
         
-        return html.replace("PLACEHOLDER_CONTENT", table_html)
+        # Combine summary and table
+        content_html = summary_html + table_html
+        
+        return html.replace("PLACEHOLDER_CONTENT", content_html)
     
     def _generate_payee_table(self, monthly_data: Dict, bill_breakdown_lookup: Dict, 
                              payee_name: str, all_schedules: List[str], result: PaymentScheduleResult) -> str:
@@ -189,8 +210,10 @@ class ProfessionalHtmlGenerator:
             bill_month_date = date(current_date.year, current_date.month + 1, 1)
         bill_month_key = bill_month_date.strftime('%Y-%m')
         
-        # Display the BILL month name (what users expect to see)
-        month_display = bill_month_date.strftime('%B %Y')
+        # Display both income month → bill month relationship for clarity
+        income_month_display = current_date.strftime('%B')
+        bill_month_display = bill_month_date.strftime('%B %Y')
+        month_display = f"{income_month_display} → {bill_month_display}"
         
         # Filter bills to only those this payee contributes to
         all_bills_due = bill_breakdown_lookup.get(bill_month_key, [])
@@ -219,7 +242,7 @@ class ProfessionalHtmlGenerator:
                     break
         
         # Calculate rows needed
-        max_rows = max(len(payee_bills) + 1, 4)  # bills + TOTAL, or 4 detail rows minimum
+        max_rows = max(len(payee_bills) + 1, 2)  # bills + TOTAL, or 2 detail rows minimum
         
         # Generate rows
         body = ""
@@ -242,7 +265,7 @@ class ProfessionalHtmlGenerator:
                 body += '<td class="empty-cell"></td><td class="empty-cell"></td>'
             
             # Detail column
-            detail_labels = ["Payment Dates", "Required", "Percentage", "TOTAL"]
+            detail_labels = ["Payment Dates", "TOTAL"]
             if row_idx < len(detail_labels):
                 body += f'<td class="detail-cell"><strong>{detail_labels[row_idx]}</strong></td>'
             else:
@@ -257,21 +280,7 @@ class ProfessionalHtmlGenerator:
                         body += f'<td class="date-cell">{", ".join(dates)}</td>'
                     else:
                         body += '<td class="empty-cell">-</td>'
-                elif row_idx == 1:  # Required
-                    if schedule in month_data:
-                        items = month_data[schedule]
-                        amounts = [self.formatter.format_currency(item.required_contribution) for item in items]
-                        body += f'<td class="required-cell">{", ".join(amounts)}</td>'
-                    else:
-                        body += '<td class="empty-cell">-</td>'
-                elif row_idx == 2:  # Percentage
-                    if schedule in month_data:
-                        items = month_data[schedule]
-                        percentages = [self.formatter.format_percentage(item.contribution_percentage) for item in items]
-                        body += f'<td class="percentage-cell">{", ".join(percentages)}</td>'
-                    else:
-                        body += '<td class="empty-cell">-</td>'
-                elif row_idx == 3:  # TOTAL
+                elif row_idx == 1:  # TOTAL
                     if schedule in month_data:
                         items = month_data[schedule]
                         total_required = sum(item.required_contribution for item in items)
@@ -372,13 +381,15 @@ class ProfessionalHtmlGenerator:
             bill_month_date = date(current_date.year, current_date.month + 1, 1)
         bill_month_key = bill_month_date.strftime('%Y-%m')
         
-        # Display the BILL month name (what users expect to see)
-        month_display = bill_month_date.strftime('%B %Y')
+        # Display both income month → bill month relationship for clarity
+        income_month_display = current_date.strftime('%B')
+        bill_month_display = bill_month_date.strftime('%B %Y')
+        month_display = f"{income_month_display} → {bill_month_display}"
         
         all_bills_due = bill_breakdown_lookup.get(bill_month_key, [])
         
         # Calculate rows needed
-        max_rows = max(len(all_bills_due) + 1, 4)  # bills + TOTAL, or 4 detail rows minimum
+        max_rows = max(len(all_bills_due) + 1, 2)  # bills + TOTAL, or 2 detail rows minimum
         
         # Generate rows
         body = ""
@@ -402,7 +413,7 @@ class ProfessionalHtmlGenerator:
                 body += '<td class="empty-cell"></td><td class="empty-cell"></td>'
             
             # Detail column
-            detail_labels = ["Payment Dates", "Required", "Percentage", "TOTAL"]
+            detail_labels = ["Payment Dates", "TOTAL"]
             if row_idx < len(detail_labels):
                 body += f'<td class="detail-cell"><strong>{detail_labels[row_idx]}</strong></td>'
             else:
@@ -417,21 +428,7 @@ class ProfessionalHtmlGenerator:
                         body += f'<td class="date-cell">{", ".join(dates)}</td>'
                     else:
                         body += '<td class="empty-cell">-</td>'
-                elif row_idx == 1:  # Required
-                    if payee_schedule_key in month_data:
-                        items = month_data[payee_schedule_key]
-                        amounts = [self.formatter.format_currency(item.required_contribution) for item in items]
-                        body += f'<td class="required-cell">{", ".join(amounts)}</td>'
-                    else:
-                        body += '<td class="empty-cell">-</td>'
-                elif row_idx == 2:  # Percentage
-                    if payee_schedule_key in month_data:
-                        items = month_data[payee_schedule_key]
-                        percentages = [self.formatter.format_percentage(item.contribution_percentage) for item in items]
-                        body += f'<td class="percentage-cell">{", ".join(percentages)}</td>'
-                    else:
-                        body += '<td class="empty-cell">-</td>'
-                elif row_idx == 3:  # TOTAL
+                elif row_idx == 1:  # TOTAL
                     if payee_schedule_key in month_data:
                         items = month_data[payee_schedule_key]
                         total_required = sum(item.required_contribution for item in items)
@@ -450,6 +447,142 @@ class ProfessionalHtmlGenerator:
         html = self._get_base_html_template("No Data", "")
         content = f'<div class="no-data"><h3>⚠️ {message}</h3></div>'
         return html.replace("PLACEHOLDER_CONTENT", content)
+    
+    def _generate_payment_summary_html(self, filtered_items: List) -> str:
+        """Generate HTML for payment summary section."""
+        # Group by payee and month to calculate monthly totals
+        payee_monthly_totals = defaultdict(lambda: defaultdict(float))
+        
+        for item in filtered_items:
+            month_key = item.payment_date.strftime('%Y-%m')
+            payee_monthly_totals[item.payee_name][month_key] += item.required_contribution
+        
+        if not payee_monthly_totals:
+            return ""
+        
+        # Get payee colors
+        payee_colors = self._get_payee_colors_from_items(filtered_items)
+        
+        # Calculate min/max for each payee
+        payee_summary = {}
+        for payee_name, monthly_totals in payee_monthly_totals.items():
+            if monthly_totals:
+                min_amount = min(monthly_totals.values())
+                max_amount = max(monthly_totals.values())
+                
+                # Find months for min/max amounts
+                min_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
+                             for month, amount in monthly_totals.items() if amount == min_amount]
+                max_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
+                             for month, amount in monthly_totals.items() if amount == max_amount]
+                
+                payee_summary[payee_name] = {
+                    'min_amount': min_amount,
+                    'max_amount': max_amount,
+                    'min_months': min_months[:2],  # Limit to first 2 months
+                    'max_months': max_months[:2]
+                }
+        
+        # Generate HTML
+        html_parts = []
+        html_parts.append('<div class="payment-summary">')
+        html_parts.append('<h3>💰 Payment Planning</h3>')
+        html_parts.append('<div class="summary-content">')
+        
+        for payee_name in sorted(payee_summary.keys()):
+            summary = payee_summary[payee_name]
+            color = payee_colors.get(payee_name, "#333333")
+            
+            min_amount_str = self.formatter.format_currency(summary['min_amount'])
+            max_amount_str = self.formatter.format_currency(summary['max_amount'])
+            
+            min_months_str = ", ".join(summary['min_months'])
+            max_months_str = ", ".join(summary['max_months'])
+            
+            html_parts.append(f'<div class="payee-summary">')
+            html_parts.append(f'<span class="payee-name" style="color: {color};">{payee_name}</span>: ')
+            
+            if summary['min_amount'] == summary['max_amount']:
+                # Same amount every month
+                html_parts.append(f'<span class="amount-range">{max_amount_str} (consistent)</span>')
+            else:
+                html_parts.append(f'<span class="amount-range">{min_amount_str} - {max_amount_str}</span>')
+                html_parts.append(f' <span class="month-detail">(min: {min_months_str}, max: {max_months_str})</span>')
+            
+            html_parts.append('</div>')
+        
+        html_parts.append('</div>')
+        html_parts.append('</div>')
+        
+        return '\n'.join(html_parts)
+    
+    def _get_payee_colors_from_items(self, items: List) -> Dict[str, str]:
+        """Get payee colors from schedule items."""
+        payees = list(set(item.payee_name for item in items))
+        payees.sort()
+        
+        colors = {}
+        for i, payee_name in enumerate(payees):
+            colors[payee_name] = self.color_generator.get_payee_color(i, 'hex')
+        
+        return colors
+    
+    def _generate_payee_payment_summary_html(self, payee_items: List, payee_name: str) -> str:
+        """Generate HTML for payee-specific payment summary section."""
+        if not payee_items:
+            return ""
+        
+        # Group by month to calculate monthly totals for this payee
+        monthly_totals = defaultdict(float)
+        
+        for item in payee_items:
+            month_key = item.payment_date.strftime('%Y-%m')
+            monthly_totals[month_key] += item.required_contribution
+        
+        if not monthly_totals:
+            return ""
+        
+        # Get payee color
+        payee_colors = self._get_payee_colors_from_items(payee_items)
+        color = payee_colors.get(payee_name, "#333333")
+        
+        # Calculate min/max for this payee
+        min_amount = min(monthly_totals.values())
+        max_amount = max(monthly_totals.values())
+        
+        # Find months for min/max amounts
+        min_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
+                     for month, amount in monthly_totals.items() if amount == min_amount]
+        max_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
+                     for month, amount in monthly_totals.items() if amount == max_amount]
+        
+        # Generate HTML
+        html_parts = []
+        html_parts.append('<div class="payment-summary">')
+        html_parts.append('<h3>💰 Payment Planning</h3>')
+        html_parts.append('<div class="summary-content">')
+        
+        min_amount_str = self.formatter.format_currency(min_amount)
+        max_amount_str = self.formatter.format_currency(max_amount)
+        
+        min_months_str = ", ".join(min_months[:2])  # Limit to first 2 months
+        max_months_str = ", ".join(max_months[:2])
+        
+        html_parts.append(f'<div class="payee-summary">')
+        html_parts.append(f'<span class="payee-name" style="color: {color}; font-weight: bold;">Payment Range for {payee_name}</span>: ')
+        
+        if min_amount == max_amount:
+            # Same amount every month
+            html_parts.append(f'<span class="amount-range">{max_amount_str} (consistent across all months)</span>')
+        else:
+            html_parts.append(f'<span class="amount-range">{min_amount_str} - {max_amount_str}</span>')
+            html_parts.append(f' <span class="month-detail">(min: {min_months_str}, max: {max_months_str})</span>')
+        
+        html_parts.append('</div>')
+        html_parts.append('</div>')
+        html_parts.append('</div>')
+        
+        return '\n'.join(html_parts)
     
     def _load_css(self) -> str:
         """Load CSS from external file."""
@@ -518,3 +651,9 @@ class ProfessionalHtmlGenerator:
     
 </body>
 </html>'''
+    
+    @staticmethod
+    def generate_payment_schedule_html(result: PaymentScheduleResult, show_zero_contribution: bool = False) -> str:
+        """Static method to generate household schedule HTML."""
+        generator = ProfessionalHtmlGenerator()
+        return generator.generate_household_schedule_html(result, show_zero_contribution)

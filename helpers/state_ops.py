@@ -54,18 +54,33 @@ def _validate_state_structure(data: dict, filename: str) -> list[str]:
                 
             bill_name = bill.get('name', f'Bill #{i}')
             
-            # Check required fields
-            if not bill.get('amount'):
-                errors.append(f"❌ Bill '{bill_name}': Missing required 'amount' field")
+            # Check required fields - support both old and new format
+            has_old_format = 'amount' in bill and 'recurrence' in bill
+            has_new_format = 'price_history' in bill and isinstance(bill['price_history'], list) and len(bill['price_history']) > 0
             
-            # Check recurrence structure
-            if 'recurrence' not in bill:
-                # Check if recurrence fields are at bill level (common mistake)
-                if any(key in bill for key in ['every', 'interval', 'kind', 'start']):
-                    errors.append(f"❌ Bill '{bill_name}': Recurrence fields should be nested under 'recurrence:' key")
-                else:
-                    errors.append(f"❌ Bill '{bill_name}': Missing required 'recurrence' field")
-            elif bill['recurrence'] is not None:
+            if not has_old_format and not has_new_format:
+                if not bill.get('amount'):
+                    errors.append(f"❌ Bill '{bill_name}': Missing required 'amount' field (or use 'price_history' for time-based pricing)")
+                
+                # Check recurrence structure for old format
+                if 'recurrence' not in bill:
+                    # Check if recurrence fields are at bill level (common mistake)
+                    if any(key in bill for key in ['every', 'interval', 'kind', 'start']):
+                        errors.append(f"❌ Bill '{bill_name}': Recurrence fields should be nested under 'recurrence:' key")
+                    else:
+                        errors.append(f"❌ Bill '{bill_name}': Missing required 'recurrence' field (or use 'price_history' for time-based pricing)")
+            elif has_new_format:
+                # Validate price_history structure
+                for j, price_entry in enumerate(bill['price_history']):
+                    if not isinstance(price_entry, dict):
+                        continue
+                    if not price_entry.get('amount'):
+                        errors.append(f"❌ Bill '{bill_name}' price_history[{j}]: Missing 'amount' field")
+                    if not price_entry.get('recurrence'):
+                        errors.append(f"❌ Bill '{bill_name}' price_history[{j}]: Missing 'recurrence' field")
+                    if not price_entry.get('start_date'):
+                        errors.append(f"❌ Bill '{bill_name}' price_history[{j}]: Missing 'start_date' field")
+            elif has_old_format and bill['recurrence'] is not None:
                 recurrence = bill['recurrence']
                 if not isinstance(recurrence, dict):
                     errors.append(f"❌ Bill '{bill_name}': 'recurrence' should be a dictionary")

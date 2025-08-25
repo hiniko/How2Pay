@@ -1,5 +1,11 @@
 # Project Files
+## output files
 *_state.yaml
+*.pdf
+*.yaml
+!example_household.yaml
+!how2pay_config.yaml
+
 
 # Python-generated files
 __pycache__/

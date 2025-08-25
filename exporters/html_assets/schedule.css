@@ -47,6 +47,7 @@ body {
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     border-radius: 8px;
     overflow: hidden;
+    page-break-before: auto;
 }
 
 .schedule-table th {
@@ -205,6 +206,46 @@ body {
     color: #e67e22;
 }
 
+.payment-summary {
+    margin-bottom: 20px;
+    padding: 15px;
+    border: 2px solid #3498db;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #f8f9ff 0%, #e8f2ff 100%);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    page-break-inside: avoid;
+    page-break-after: always;
+}
+
+.payment-summary h3 {
+    margin: 0 0 10px 0;
+    color: #2980b9;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.payee-summary {
+    margin: 6px 0;
+    font-size: 13px;
+    line-height: 1.4;
+    page-break-inside: avoid;
+}
+
+.payee-name {
+    font-weight: bold;
+}
+
+.amount-range {
+    font-weight: 600;
+    color: #27ae60;
+}
+
+.month-detail {
+    color: #7f8c8d;
+    font-style: italic;
+    font-size: 12px;
+}
+
 /* Page break rules for monthly sections */
 .month-section {
     page-break-before: always;
@@ -223,6 +264,20 @@ body {
     }
     .schedule-table {
         box-shadow: none;
+    }
+    
+    /* Ensure payment summary stays on first page, table starts on second */
+    .payment-summary {
+        page-break-inside: avoid;
+        page-break-after: always;
+    }
+    
+    .schedule-table {
+        page-break-before: auto;
+    }
+    
+    .payee-summary {
+        page-break-inside: avoid;
     }
     
     /* Ensure month sections break to new pages */

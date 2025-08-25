@@ -24,7 +24,8 @@ class PdfExporter:
     def export_schedule_to_pdf(
         result: PaymentScheduleResult,
         output_path: str,
-        payee_name: Optional[str] = None
+        payee_name: Optional[str] = None,
+        show_zero_contribution: bool = False
     ) -> bool:
         """
         Export schedule to professional PDF. Handles both payee-specific and household schedules.
@@ -41,19 +42,22 @@ class PdfExporter:
             return PdfExporter.export_professional_payee_schedule_to_pdf(
                 result=result,
                 payee_name=payee_name,
-                output_path=output_path
+                output_path=output_path,
+                show_zero_contribution=show_zero_contribution
             )
         else:
             return PdfExporter.export_professional_household_schedule_to_pdf(
                 result=result,
-                output_path=output_path
+                output_path=output_path,
+                show_zero_contribution=show_zero_contribution
             )
     
     @staticmethod
     def export_professional_payee_schedule_to_pdf(
         result: PaymentScheduleResult,
         payee_name: str,
-        output_path: str
+        output_path: str,
+        show_zero_contribution: bool = False
     ) -> bool:
         """
         Export payee schedule to professional PDF using direct HTML generation.
@@ -75,7 +79,7 @@ class PdfExporter:
         
         # Generate professional HTML
         html_generator = ProfessionalHtmlGenerator()
-        html_content = html_generator.generate_payee_schedule_html(result, payee_name)
+        html_content = html_generator.generate_payee_schedule_html(result, payee_name, show_zero_contribution)
         
         # Convert to PDF with professional CSS optimized for landscape
         HTML(string=html_content).write_pdf(
@@ -106,7 +110,8 @@ class PdfExporter:
     @staticmethod
     def export_professional_household_schedule_to_pdf(
         result: PaymentScheduleResult,
-        output_path: str
+        output_path: str,
+        show_zero_contribution: bool = False
     ) -> bool:
         """
         Export household schedule to professional PDF.
@@ -127,7 +132,7 @@ class PdfExporter:
         
         # Generate professional HTML
         html_generator = ProfessionalHtmlGenerator()
-        html_content = html_generator.generate_household_schedule_html(result)
+        html_content = html_generator.generate_household_schedule_html(result, show_zero_contribution)
         
         # Convert to PDF
         HTML(string=html_content).write_pdf(

@@ -631,6 +631,234 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         # The cutoff date affects the calculation but payment_date shows the income date
         self.assertTrue(item.is_before_cutoff)
 
+    def test_multiple_income_streams_with_100_percent_contribution_bug(self):
+        """Test bug: Multiple income streams with 100% contribution should split responsibility, not double it."""
+        bills = [self.create_monthly_bill("Rent", 1000.0, date(2024, 3, 15))]
+        
+        # Alice has two 4-weekly payments that both occur in February (month before March bills)
+        # Both have 100% contribution - they should SPLIT the responsibility, not both take 100%
+        four_weekly_1 = Recurrence(kind='interval', interval='weekly', every=4, start=date(2024, 2, 1))
+        four_weekly_2 = Recurrence(kind='interval', interval='weekly', every=4, start=date(2024, 2, 15))
+        
+        alice_schedules = [
+            PaySchedule(amount=500.0, recurrence=four_weekly_1, description="Job A", contribution_percentage=100.0),
+            PaySchedule(amount=500.0, recurrence=four_weekly_2, description="Job B", contribution_percentage=100.0)
+        ]
+        alice = Payee(name="Alice", pay_schedules=alice_schedules)
+        
+        payees = [alice]
+        state = self.create_simple_test_state(bills, payees)
+        scheduler = CashFlowScheduler(state)
+        
+        result = scheduler.calculate_proportional_contributions(3, 2024, 1)
+        
+        # Alice is the only payee, so her per-payee responsibility is 1000.0
+        # She has two income streams both with 100% contribution
+        # The bug: both streams get 1000.0 contribution (total 2000.0)
+        # Expected: both streams should split the 1000.0 (500.0 each)
+        
+        alice_items = [item for item in result.schedule_items if item.payee_name == "Alice"]
+        total_alice_contribution = sum(item.required_contribution for item in alice_items)
+        
+        # This should be 1000.0 (her full responsibility), not 2000.0 (double)
+        self.assertEqual(total_alice_contribution, 1000.0, 
+                        f"Expected 1000.0 total contribution, got {total_alice_contribution}. "
+                        f"Individual contributions: {[item.required_contribution for item in alice_items]}")
+
+    def test_custom_percentages_over_100_percent_normalized(self):
+        """Test that custom percentages over 100% are normalized proportionally."""
+        bills = [self.create_monthly_bill("Rent", 1000.0, date(2024, 3, 15))]
+        
+        # Alice has two income streams: one with 80% and one with 60% (total 140%)
+        # They should be normalized to 80/140 and 60/140 of the total responsibility
+        monthly_1 = Recurrence(kind='calendar', interval='monthly', start=date(2024, 2, 10))
+        monthly_2 = Recurrence(kind='calendar', interval='monthly', start=date(2024, 2, 20))
+        
+        alice_schedules = [
+            PaySchedule(amount=2000.0, recurrence=monthly_1, description="Job A", contribution_percentage=80.0),
+            PaySchedule(amount=1500.0, recurrence=monthly_2, description="Job B", contribution_percentage=60.0)
+        ]
+        alice = Payee(name="Alice", pay_schedules=alice_schedules)
+        
+        payees = [alice]
+        state = self.create_simple_test_state(bills, payees)
+        scheduler = CashFlowScheduler(state)
+        
+        result = scheduler.calculate_proportional_contributions(3, 2024, 1)
+        
+        alice_items = [item for item in result.schedule_items if item.payee_name == "Alice"]
+        
+        # Total should still be 1000.0 (her full responsibility)
+        total_alice_contribution = sum(item.required_contribution for item in alice_items)
+        self.assertEqual(total_alice_contribution, 1000.0)
+        
+        # Job A should get 80/140 = 4/7 of 1000 = ~571.43
+        # Job B should get 60/140 = 3/7 of 1000 = ~428.57
+        job_a_item = next(item for item in alice_items if item.schedule_description == "Job A")
+        job_b_item = next(item for item in alice_items if item.schedule_description == "Job B")
+        
+        expected_a = 1000.0 * (80.0 / 140.0)  # ~571.43
+        expected_b = 1000.0 * (60.0 / 140.0)  # ~428.57
+        
+        self.assertAlmostEqual(job_a_item.required_contribution, expected_a, places=2)
+        self.assertAlmostEqual(job_b_item.required_contribution, expected_b, places=2)
+
+    def test_mixed_custom_and_no_percentage_schedules(self):
+        """Test scenario with some schedules having custom percentages and others without."""
+        bills = [self.create_monthly_bill("Rent", 1000.0, date(2024, 3, 15))]
+        
+        # Alice has 3 income streams:
+        # - Job A: 60% custom contribution 
+        # - Job B: no custom percentage (should get proportional share of remaining 40%)
+        # - Job C: no custom percentage (should get proportional share of remaining 40%)
+        monthly_1 = Recurrence(kind='calendar', interval='monthly', start=date(2024, 2, 10))
+        monthly_2 = Recurrence(kind='calendar', interval='monthly', start=date(2024, 2, 15))
+        monthly_3 = Recurrence(kind='calendar', interval='monthly', start=date(2024, 2, 20))
+        
+        alice_schedules = [
+            PaySchedule(amount=3000.0, recurrence=monthly_1, description="Job A", contribution_percentage=60.0),
+            PaySchedule(amount=2000.0, recurrence=monthly_2, description="Job B"),  # No custom percentage
+            PaySchedule(amount=1000.0, recurrence=monthly_3, description="Job C")   # No custom percentage
+        ]
+        alice = Payee(name="Alice", pay_schedules=alice_schedules)
+        
+        payees = [alice]
+        state = self.create_simple_test_state(bills, payees)
+        scheduler = CashFlowScheduler(state)
+        
+        result = scheduler.calculate_proportional_contributions(3, 2024, 1)
+        
+        alice_items = [item for item in result.schedule_items if item.payee_name == "Alice"]
+        
+        # Total should be 1000.0 (her full responsibility)
+        total_alice_contribution = sum(item.required_contribution for item in alice_items)
+        self.assertEqual(total_alice_contribution, 1000.0)
+        
+        job_a_item = next(item for item in alice_items if item.schedule_description == "Job A")
+        job_b_item = next(item for item in alice_items if item.schedule_description == "Job B") 
+        job_c_item = next(item for item in alice_items if item.schedule_description == "Job C")
+        
+        # Job A should get 60% = 600.0
+        self.assertAlmostEqual(job_a_item.required_contribution, 600.0, places=2)
+        
+        # Jobs B and C should split the remaining 40% (400.0) proportionally by income:
+        # Job B: 2000/(2000+1000) * 400 = 2/3 * 400 = ~266.67
+        # Job C: 1000/(2000+1000) * 400 = 1/3 * 400 = ~133.33
+        remaining_amount = 400.0
+        total_remaining_income = 2000.0 + 1000.0
+        expected_b = remaining_amount * (2000.0 / total_remaining_income)
+        expected_c = remaining_amount * (1000.0 / total_remaining_income)
+        
+        self.assertAlmostEqual(job_b_item.required_contribution, expected_b, places=2)
+        self.assertAlmostEqual(job_c_item.required_contribution, expected_c, places=2)
+
+    def test_zero_contribution_streams_exist(self):
+        """Test that 0% contribution streams can be generated."""
+        bills = [self.create_monthly_bill("Rent", 1000.0, date(2024, 3, 15))]
+        
+        # Alice has 2 income streams:
+        # - Job A: 100% contribution (should handle all the bills)
+        # - Job B: 0% contribution (should contribute nothing, effectively "savings only")
+        monthly_1 = Recurrence(kind='calendar', interval='monthly', start=date(2024, 2, 10))
+        monthly_2 = Recurrence(kind='calendar', interval='monthly', start=date(2024, 2, 20))
+        
+        alice_schedules = [
+            PaySchedule(amount=2000.0, recurrence=monthly_1, description="Job A", contribution_percentage=100.0),
+            PaySchedule(amount=500.0, recurrence=monthly_2, description="Job B", contribution_percentage=0.0)  # Savings stream
+        ]
+        alice = Payee(name="Alice", pay_schedules=alice_schedules)
+        
+        payees = [alice]
+        state = self.create_simple_test_state(bills, payees)
+        scheduler = CashFlowScheduler(state)
+        
+        result = scheduler.calculate_proportional_contributions(3, 2024, 1)
+        
+        alice_items = [item for item in result.schedule_items if item.payee_name == "Alice"]
+        
+        # Should have 2 items (both streams)
+        self.assertEqual(len(alice_items), 2)
+        
+        # Job A should handle 100% of bills = 1000.0
+        job_a_item = next(item for item in alice_items if item.schedule_description == "Job A")
+        job_b_item = next(item for item in alice_items if item.schedule_description == "Job B")
+        
+        self.assertEqual(job_a_item.required_contribution, 1000.0)
+        self.assertEqual(job_b_item.required_contribution, 0.0)  # This is the 0% contribution stream
+
+    def test_payee_start_date_excludes_inactive_payees(self):
+        """Test that payees with start dates in the future are excluded from bill calculations."""
+        bills = [self.create_monthly_bill("Rent", 1000.0, date(2024, 3, 15))]
+        
+        # Alice is active from the beginning (no start date)
+        # Bob starts in April 2024, so shouldn't contribute to March 2024 bills
+        monthly_recurrence = Recurrence(kind='calendar', interval='monthly', start=date(2024, 2, 15))
+        
+        alice_schedules = [
+            PaySchedule(amount=2000.0, recurrence=monthly_recurrence, description="Alice Job")
+        ]
+        bob_schedules = [
+            PaySchedule(amount=1500.0, recurrence=monthly_recurrence, description="Bob Job")
+        ]
+        
+        alice = Payee(name="Alice", pay_schedules=alice_schedules)  # No start date = always active
+        bob = Payee(name="Bob", pay_schedules=bob_schedules, start_date=date(2024, 4, 1))  # Starts April 1st
+        
+        payees = [alice, bob]
+        state = self.create_simple_test_state(bills, payees)
+        scheduler = CashFlowScheduler(state)
+        
+        # Test March 2024 - Bob should not contribute
+        result = scheduler.calculate_proportional_contributions(3, 2024, 1)
+        
+        # Should only have Alice's items (Bob is inactive)
+        alice_items = [item for item in result.schedule_items if item.payee_name == "Alice"]
+        bob_items = [item for item in result.schedule_items if item.payee_name == "Bob"]
+        
+        self.assertEqual(len(alice_items), 1)  # Alice should have 1 item
+        self.assertEqual(len(bob_items), 0)    # Bob should have no items (inactive)
+        
+        # Alice should be responsible for the full $1000 since Bob is inactive
+        alice_item = alice_items[0]
+        self.assertEqual(alice_item.required_contribution, 1000.0)
+        
+    def test_payee_start_date_includes_active_payees(self):
+        """Test that payees become active after their start date."""
+        bills = [self.create_monthly_bill("Rent", 1000.0, date(2024, 5, 15))]
+        
+        # Alice is active from the beginning
+        # Bob starts in April 2024, so should contribute to May 2024 bills
+        monthly_recurrence = Recurrence(kind='calendar', interval='monthly', start=date(2024, 4, 15))
+        
+        alice_schedules = [
+            PaySchedule(amount=2000.0, recurrence=monthly_recurrence, description="Alice Job")
+        ]
+        bob_schedules = [
+            PaySchedule(amount=1500.0, recurrence=monthly_recurrence, description="Bob Job")
+        ]
+        
+        alice = Payee(name="Alice", pay_schedules=alice_schedules)  # No start date = always active
+        bob = Payee(name="Bob", pay_schedules=bob_schedules, start_date=date(2024, 4, 1))  # Starts April 1st
+        
+        payees = [alice, bob]
+        state = self.create_simple_test_state(bills, payees)
+        scheduler = CashFlowScheduler(state)
+        
+        # Test May 2024 - Both should contribute (Bob is active by then)
+        result = scheduler.calculate_proportional_contributions(5, 2024, 1)
+        
+        alice_items = [item for item in result.schedule_items if item.payee_name == "Alice"]
+        bob_items = [item for item in result.schedule_items if item.payee_name == "Bob"]
+        
+        self.assertEqual(len(alice_items), 1)  # Alice should have 1 item
+        self.assertEqual(len(bob_items), 1)    # Bob should have 1 item (now active)
+        
+        # Both should split the $1000 equally (500 each)
+        alice_item = alice_items[0]
+        bob_item = bob_items[0]
+        self.assertEqual(alice_item.required_contribution, 500.0)
+        self.assertEqual(bob_item.required_contribution, 500.0)
+
 
 class TestGetPayeeIncomeInMonth(unittest.TestCase):
     
