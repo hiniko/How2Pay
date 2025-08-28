@@ -3,7 +3,7 @@
 from datetime import date
 from typing import Dict, List, Optional
 from collections import defaultdict
-from scheduler.cash_flow import PaymentScheduleResult
+from scheduler.payment_scheduler import PaymentScheduleResult, PayeeAnalytics, PeriodAnalytics
 from helpers.formatting import get_formatter
 from helpers.payee_colors import PayeeColorGenerator
 
@@ -58,7 +58,7 @@ class ProfessionalHtmlGenerator:
         all_schedules = sorted(all_schedules)
         
         # Generate payee-specific payment summary
-        summary_html = self._generate_payee_payment_summary_html(payee_items, payee_name)
+        summary_html = self._generate_payee_payment_summary_html(result, payee_name)
         
         # Generate HTML
         html = self._get_base_html_template(
@@ -117,7 +117,7 @@ class ProfessionalHtmlGenerator:
         )
         
         # Generate payment summary
-        summary_html = self._generate_payment_summary_html(filtered_items)
+        summary_html = self._generate_payment_summary_html(result, show_zero_contribution)
         
         # Generate table
         table_html = self._generate_household_table(
@@ -448,71 +448,151 @@ class ProfessionalHtmlGenerator:
         content = f'<div class="no-data"><h3>⚠️ {message}</h3></div>'
         return html.replace("PLACEHOLDER_CONTENT", content)
     
-    def _generate_payment_summary_html(self, filtered_items: List) -> str:
-        """Generate HTML for payment summary section."""
-        # Group by payee and month to calculate monthly totals
-        payee_monthly_totals = defaultdict(lambda: defaultdict(float))
+    def _generate_payment_summary_html(self, result: PaymentScheduleResult, show_zero_contribution: bool = False) -> str:
+        """Generate comprehensive HTML analytics with improved PDF layout."""
+        analytics = result.analytics
         
-        for item in filtered_items:
-            month_key = item.payment_date.strftime('%Y-%m')
-            payee_monthly_totals[item.payee_name][month_key] += item.required_contribution
+        # Filter payees based on contribution preference
+        displayed_payees = analytics.payee_analytics
+        if not show_zero_contribution:
+            displayed_payees = {name: payee_analytics for name, payee_analytics in analytics.payee_analytics.items() 
+                               if payee_analytics.max_amount > 0}
         
-        if not payee_monthly_totals:
+        if not displayed_payees:
             return ""
         
         # Get payee colors
-        payee_colors = self._get_payee_colors_from_items(filtered_items)
+        payee_colors = self._get_payee_colors(result)
         
-        # Calculate min/max for each payee
-        payee_summary = {}
-        for payee_name, monthly_totals in payee_monthly_totals.items():
-            if monthly_totals:
-                min_amount = min(monthly_totals.values())
-                max_amount = max(monthly_totals.values())
-                
-                # Find months for min/max amounts
-                min_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
-                             for month, amount in monthly_totals.items() if amount == min_amount]
-                max_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
-                             for month, amount in monthly_totals.items() if amount == max_amount]
-                
-                payee_summary[payee_name] = {
-                    'min_amount': min_amount,
-                    'max_amount': max_amount,
-                    'min_months': min_months[:2],  # Limit to first 2 months
-                    'max_months': max_months[:2]
-                }
-        
-        # Generate HTML
         html_parts = []
-        html_parts.append('<div class="payment-summary">')
-        html_parts.append('<h3>💰 Payment Planning</h3>')
-        html_parts.append('<div class="summary-content">')
         
-        for payee_name in sorted(payee_summary.keys()):
-            summary = payee_summary[payee_name]
-            color = payee_colors.get(payee_name, "#333333")
+        # Combined Introduction & Period Overview (Page 1)
+        html_parts.append('<div class="intro-period-page">')
+        
+        # Compact Introduction Section
+        html_parts.append('<div class="intro-compact">')
+        html_parts.append('<h1 class="intro-title-compact">📊 Payment Planning Guide</h1>')
+        html_parts.append('<div class="intro-content-compact">')
+        html_parts.append('<p class="intro-desc">This report shows your household\'s financial projections with period overview and individual breakdowns.</p>')
+        html_parts.append('<div class="intro-sections-compact">')
+        html_parts.append('<div class="intro-section-compact">')
+        html_parts.append('<strong>📈 Period Overview:</strong> Total costs, monthly averages, and payment ranges.')
+        html_parts.append('</div>')
+        html_parts.append('<div class="intro-section-compact">')
+        html_parts.append('<strong>👥 Individual Breakdown:</strong> Each person\'s payment details and share of bills.')
+        html_parts.append('</div>')
+        html_parts.append('</div>')
+        html_parts.append('<div class="intro-tip-compact">')
+        html_parts.append('<strong>💡 Tip:</strong> Use monthly ranges to plan savings - save during low-cost months for high-cost periods.')
+        html_parts.append('</div>')
+        html_parts.append('</div>')
+        html_parts.append('</div>')
+        
+        # Period Overview Section (Same Page)
+        html_parts.append('<div class="period-section-compact">')
+        html_parts.append('<h2 class="section-title-compact">📈 Period Overview</h2>')
+        
+        # Key metrics in a 2x2 grid
+        total_str = self.formatter.format_currency(analytics.total_bills_required)
+        avg_str = self.formatter.format_currency(analytics.average_monthly_requirement)
+        
+        html_parts.append('<div class="overview-metrics-compact">')
+        html_parts.append(f'<div class="metric-card-compact primary">')
+        html_parts.append(f'<div class="metric-icon-compact">💰</div>')
+        html_parts.append(f'<div class="metric-label-compact">Total Bills ({result.months_ahead}mo)</div>')
+        html_parts.append(f'<div class="metric-value-compact">{total_str}</div>')
+        html_parts.append('</div>')
+        
+        html_parts.append(f'<div class="metric-card-compact primary">')
+        html_parts.append(f'<div class="metric-icon-compact">📊</div>')
+        html_parts.append(f'<div class="metric-label-compact">Average Monthly</div>')
+        html_parts.append(f'<div class="metric-value-compact">{avg_str}</div>')
+        html_parts.append('</div>')
+        
+        # Monthly range metrics
+        if analytics.min_monthly_total != analytics.max_monthly_total:
+            min_monthly_str = self.formatter.format_currency(analytics.min_monthly_total)
+            max_monthly_str = self.formatter.format_currency(analytics.max_monthly_total)
+            min_months_str = ", ".join(analytics.min_months)
+            max_months_str = ", ".join(analytics.max_months)
             
-            min_amount_str = self.formatter.format_currency(summary['min_amount'])
-            max_amount_str = self.formatter.format_currency(summary['max_amount'])
-            
-            min_months_str = ", ".join(summary['min_months'])
-            max_months_str = ", ".join(summary['max_months'])
-            
-            html_parts.append(f'<div class="payee-summary">')
-            html_parts.append(f'<span class="payee-name" style="color: {color};">{payee_name}</span>: ')
-            
-            if summary['min_amount'] == summary['max_amount']:
-                # Same amount every month
-                html_parts.append(f'<span class="amount-range">{max_amount_str} (consistent)</span>')
-            else:
-                html_parts.append(f'<span class="amount-range">{min_amount_str} - {max_amount_str}</span>')
-                html_parts.append(f' <span class="month-detail">(min: {min_months_str}, max: {max_months_str})</span>')
-            
+            html_parts.append(f'<div class="metric-card-compact range">')
+            html_parts.append(f'<div class="metric-icon-compact">📈</div>')
+            html_parts.append(f'<div class="metric-label-compact">Monthly Range</div>')
+            html_parts.append(f'<div class="metric-value-compact">{min_monthly_str} - {max_monthly_str}</div>')
+            html_parts.append(f'<div class="metric-detail-compact">Low: {min_months_str}</div>')
+            html_parts.append(f'<div class="metric-detail-compact">High: {max_months_str}</div>')
+            html_parts.append('</div>')
+        else:
+            consistent_str = self.formatter.format_currency(analytics.min_monthly_total)
+            html_parts.append(f'<div class="metric-card-compact consistent">')
+            html_parts.append(f'<div class="metric-icon-compact">✓</div>')
+            html_parts.append(f'<div class="metric-label-compact">Monthly Cost</div>')
+            html_parts.append(f'<div class="metric-value-compact">{consistent_str}</div>')
+            html_parts.append(f'<div class="metric-detail-compact">Consistent</div>')
             html_parts.append('</div>')
         
-        html_parts.append('</div>')
-        html_parts.append('</div>')
+        html_parts.append('</div>') # Close overview-metrics-compact
+        html_parts.append('</div>') # Close period-section-compact
+        html_parts.append('</div>') # Close intro-period-page
+        
+        # Payee Breakdown Section (Page 3+)
+        html_parts.append('<div class="payee-page">')
+        html_parts.append('<h2 class="page-title">👥 Individual Breakdown</h2>')
+        html_parts.append('<div class="payee-grid">')
+        
+        for payee_name in sorted(displayed_payees.keys()):
+            payee_analytics = displayed_payees[payee_name]
+            color = payee_colors.get(payee_name, "#333333")
+            
+            html_parts.append(f'<div class="payee-card-compact" style="border-top: 4px solid {color};">')
+            html_parts.append(f'<h4 class="payee-name-compact" style="color: {color};">{payee_name}</h4>')
+            
+            min_amount_str = self.formatter.format_currency(payee_analytics.min_amount)
+            max_amount_str = self.formatter.format_currency(payee_analytics.max_amount)
+            avg_amount_str = self.formatter.format_currency(payee_analytics.average_amount)
+            total_amount_str = self.formatter.format_currency(payee_analytics.total_amount)
+            
+            # Payment range
+            if payee_analytics.is_consistent:
+                html_parts.append('<div class="metric-compact">')
+                html_parts.append('<span class="label-compact">Monthly Payment:</span>')
+                html_parts.append(f'<span class="value-compact">{max_amount_str}</span>')
+                html_parts.append('<div class="detail-compact">Consistent</div>')
+                html_parts.append('</div>')
+            else:
+                min_months_str = ", ".join(payee_analytics.min_months)
+                max_months_str = ", ".join(payee_analytics.max_months)
+                html_parts.append('<div class="metric-compact">')
+                html_parts.append('<span class="label-compact">Range:</span>')
+                html_parts.append(f'<span class="value-compact">{min_amount_str} - {max_amount_str}</span>')
+                html_parts.append(f'<div class="detail-compact">Min: {min_months_str}</div>')
+                html_parts.append(f'<div class="detail-compact">Max: {max_months_str}</div>')
+                html_parts.append('</div>')
+            
+            # Average and total
+            html_parts.append('<div class="metric-compact">')
+            html_parts.append('<span class="label-compact">Average Monthly:</span>')
+            html_parts.append(f'<span class="value-compact">{avg_amount_str}</span>')
+            html_parts.append('</div>')
+            
+            html_parts.append('<div class="metric-compact">')
+            html_parts.append(f'<span class="label-compact">Total ({result.months_ahead}mo):</span>')
+            html_parts.append(f'<span class="value-compact">{total_amount_str}</span>')
+            html_parts.append('</div>')
+            
+            # Percentage of total
+            if analytics.total_bills_required > 0:
+                percentage = (payee_analytics.total_amount / analytics.total_bills_required) * 100
+                html_parts.append('<div class="metric-compact">')
+                html_parts.append('<span class="label-compact">Share of Bills:</span>')
+                html_parts.append(f'<span class="value-compact highlight">{percentage:.1f}%</span>')
+                html_parts.append('</div>')
+            
+            html_parts.append('</div>') # Close payee-card-compact
+        
+        html_parts.append('</div>') # Close payee-grid
+        html_parts.append('</div>') # Close payee-page
         
         return '\n'.join(html_parts)
     
@@ -527,60 +607,88 @@ class ProfessionalHtmlGenerator:
         
         return colors
     
-    def _generate_payee_payment_summary_html(self, payee_items: List, payee_name: str) -> str:
-        """Generate HTML for payee-specific payment summary section."""
-        if not payee_items:
-            return ""
+    def _generate_payee_payment_summary_html(self, result: PaymentScheduleResult, payee_name: str) -> str:
+        """Generate comprehensive HTML analytics for a specific payee."""
+        analytics = result.analytics
         
-        # Group by month to calculate monthly totals for this payee
-        monthly_totals = defaultdict(float)
-        
-        for item in payee_items:
-            month_key = item.payment_date.strftime('%Y-%m')
-            monthly_totals[month_key] += item.required_contribution
-        
-        if not monthly_totals:
+        # Get analytics for this specific payee
+        payee_analytics = analytics.payee_analytics.get(payee_name)
+        if not payee_analytics or payee_analytics.max_amount <= 0:
             return ""
         
         # Get payee color
-        payee_colors = self._get_payee_colors_from_items(payee_items)
+        payee_colors = self._get_payee_colors(result)
         color = payee_colors.get(payee_name, "#333333")
         
-        # Calculate min/max for this payee
-        min_amount = min(monthly_totals.values())
-        max_amount = max(monthly_totals.values())
-        
-        # Find months for min/max amounts
-        min_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
-                     for month, amount in monthly_totals.items() if amount == min_amount]
-        max_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
-                     for month, amount in monthly_totals.items() if amount == max_amount]
-        
-        # Generate HTML
+        # Generate comprehensive HTML analytics for payee
         html_parts = []
-        html_parts.append('<div class="payment-summary">')
-        html_parts.append('<h3>💰 Payment Planning</h3>')
-        html_parts.append('<div class="summary-content">')
+        html_parts.append('<div class="analytics-container payee-analytics">')
+        html_parts.append(f'<h2 class="analytics-title" style="color: {color};">📊 Analytics for {payee_name.upper()}</h2>')
         
-        min_amount_str = self.formatter.format_currency(min_amount)
-        max_amount_str = self.formatter.format_currency(max_amount)
+        # Payment Analysis Section
+        html_parts.append('<div class="payment-analysis">')
+        html_parts.append('<h3 class="section-title">💰 Payment Analysis</h3>')
+        html_parts.append('<div class="analysis-grid">')
         
-        min_months_str = ", ".join(min_months[:2])  # Limit to first 2 months
-        max_months_str = ", ".join(max_months[:2])
+        min_amount_str = self.formatter.format_currency(payee_analytics.min_amount)
+        max_amount_str = self.formatter.format_currency(payee_analytics.max_amount)
+        avg_amount_str = self.formatter.format_currency(payee_analytics.average_amount)
+        total_amount_str = self.formatter.format_currency(payee_analytics.total_amount)
         
-        html_parts.append(f'<div class="payee-summary">')
-        html_parts.append(f'<span class="payee-name" style="color: {color}; font-weight: bold;">Payment Range for {payee_name}</span>: ')
-        
-        if min_amount == max_amount:
-            # Same amount every month
-            html_parts.append(f'<span class="amount-range">{max_amount_str} (consistent across all months)</span>')
+        # Payment range card
+        html_parts.append(f'<div class="metric-card primary-card" style="border-top: 3px solid {color};">')
+        if payee_analytics.is_consistent:
+            html_parts.append(f'<div class="metric-label">Monthly Payment</div>')
+            html_parts.append(f'<div class="metric-value">{max_amount_str}</div>')
+            html_parts.append(f'<div class="metric-detail">Consistent across all months</div>')
         else:
-            html_parts.append(f'<span class="amount-range">{min_amount_str} - {max_amount_str}</span>')
-            html_parts.append(f' <span class="month-detail">(min: {min_months_str}, max: {max_months_str})</span>')
+            min_months_str = ", ".join(payee_analytics.min_months)
+            max_months_str = ", ".join(payee_analytics.max_months)
+            html_parts.append(f'<div class="metric-label">Payment Range</div>')
+            html_parts.append(f'<div class="metric-value">{min_amount_str} - {max_amount_str}</div>')
+            html_parts.append(f'<div class="metric-detail">Min: {min_months_str}</div>')
+            html_parts.append(f'<div class="metric-detail">Max: {max_months_str}</div>')
+        html_parts.append('</div>')
         
+        # Average monthly
+        html_parts.append(f'<div class="metric-card">')
+        html_parts.append(f'<div class="metric-label">Average Monthly</div>')
+        html_parts.append(f'<div class="metric-value">{avg_amount_str}</div>')
         html_parts.append('</div>')
+        
+        html_parts.append('</div>') # Close analysis-grid
+        html_parts.append('</div>') # Close payment-analysis
+        
+        # Period Summary Section
+        html_parts.append('<div class="period-summary">')
+        html_parts.append(f'<h3 class="section-title">📊 Period Summary ({result.months_ahead} months)</h3>')
+        html_parts.append('<div class="summary-grid">')
+        
+        # Total contribution
+        html_parts.append(f'<div class="metric-card">')
+        html_parts.append(f'<div class="metric-label">Total Contribution</div>')
+        html_parts.append(f'<div class="metric-value">{total_amount_str}</div>')
         html_parts.append('</div>')
+        
+        # Percentage of total
+        if analytics.total_bills_required > 0:
+            percentage = (payee_analytics.total_amount / analytics.total_bills_required) * 100
+            html_parts.append(f'<div class="metric-card">')
+            html_parts.append(f'<div class="metric-label">Share of Total Bills</div>')
+            html_parts.append(f'<div class="metric-value">{percentage:.1f}%</div>')
+            html_parts.append('</div>')
+        
+        # vs Household average
+        household_avg_str = self.formatter.format_currency(analytics.average_monthly_requirement)
+        html_parts.append(f'<div class="metric-card comparison-card">')
+        html_parts.append(f'<div class="metric-label">vs Household Average</div>')
+        html_parts.append(f'<div class="metric-value">{avg_amount_str}</div>')
+        html_parts.append(f'<div class="metric-detail">Household: {household_avg_str}</div>')
         html_parts.append('</div>')
+        
+        html_parts.append('</div>') # Close summary-grid
+        html_parts.append('</div>') # Close period-summary
+        html_parts.append('</div>') # Close analytics-container
         
         return '\n'.join(html_parts)
     

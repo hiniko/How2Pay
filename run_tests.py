@@ -4,7 +4,7 @@ Test runner for the Finances project.
 
 Usage:
     python run_tests.py                    # Run all tests
-    python run_tests.py test_cash_flow     # Run specific test file
+    python run_tests.py test_payment_scheduler     # Run specific test file
     python run_tests.py TestCalculateMonthlyBillTotal  # Run specific test class
 """
 
@@ -30,7 +30,7 @@ def run_tests(test_pattern=None):
         except Exception:
             try:
                 # Maybe it's a test class
-                suite = loader.loadTestsFromName(f'tests.test_cash_flow.{test_pattern}')
+                suite = loader.loadTestsFromName(f'tests.test_payment_scheduler.{test_pattern}')
             except Exception:
                 print(f"Could not find test pattern: {test_pattern}")
                 return False

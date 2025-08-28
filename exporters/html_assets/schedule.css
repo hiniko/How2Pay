@@ -206,6 +206,376 @@ body {
     color: #e67e22;
 }
 
+/* Page Layout Styles */
+.intro-page {
+    page-break-after: always;
+    page-break-inside: avoid;
+    min-height: 80vh;
+    padding: 30px;
+}
+
+.intro-period-page {
+    page-break-after: always;
+    page-break-inside: avoid;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.period-page, .payee-page {
+    page-break-before: always;
+    page-break-after: always;
+    page-break-inside: avoid;
+    min-height: 80vh;
+    padding: 30px;
+}
+
+/* Introduction Page Styles */
+.intro-title {
+    text-align: center;
+    color: #2980b9;
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 30px;
+    border-bottom: 3px solid #3498db;
+    padding-bottom: 20px;
+}
+
+/* Compact Introduction Styles */
+.intro-compact {
+    margin-bottom: 20px;
+}
+
+.intro-title-compact {
+    text-align: center;
+    color: #2980b9;
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 15px;
+    border-bottom: 2px solid #3498db;
+    padding-bottom: 10px;
+}
+
+.intro-content-compact {
+    font-size: 13px;
+    line-height: 1.4;
+    color: #34495e;
+    text-align: center;
+    margin-bottom: 15px;
+}
+
+.intro-tips {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+    border: 1px solid #f39c12;
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 11px;
+    color: #856404;
+    margin-top: 10px;
+}
+
+.intro-content h2 {
+    color: #34495e;
+    font-size: 20px;
+    margin-bottom: 20px;
+}
+
+.intro-sections {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    margin: 30px 0;
+}
+
+.intro-section {
+    background: white;
+    border: 1px solid #e3e8ee;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+.intro-section h3 {
+    color: #3498db;
+    font-size: 18px;
+    margin-bottom: 15px;
+    border-bottom: 2px solid #ecf0f1;
+    padding-bottom: 8px;
+}
+
+.intro-section ul {
+    margin-left: 20px;
+    line-height: 1.6;
+}
+
+.intro-section li {
+    margin-bottom: 8px;
+}
+
+.intro-tip {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+    border: 1px solid #f39c12;
+    border-radius: 8px;
+    padding: 20px;
+    margin-top: 30px;
+}
+
+.intro-tip h3 {
+    color: #d68910;
+    margin-bottom: 10px;
+}
+
+/* Period Overview Page Styles */
+.page-title {
+    text-align: center;
+    color: #2980b9;
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 30px;
+    border-bottom: 3px solid #3498db;
+    padding-bottom: 15px;
+}
+
+.period-overview-content {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.overview-metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 20px;
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+/* Compact Period Overview Styles */
+.period-section-compact {
+    margin-bottom: 20px;
+}
+
+.section-title-compact {
+    text-align: center;
+    color: #2980b9;
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 15px;
+    border-bottom: 2px solid #3498db;
+    padding-bottom: 8px;
+}
+
+.overview-metrics-compact {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+.metric-card {
+    background: white;
+    border: 1px solid #e3e8ee;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    transition: transform 0.2s ease;
+}
+
+.metric-card-compact {
+    background: white;
+    border: 1px solid #e3e8ee;
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+    font-size: 12px;
+}
+
+.metric-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+}
+
+.metric-card.primary {
+    border-top: 4px solid #3498db;
+    background: linear-gradient(135deg, #ffffff 0%, #f8f9ff 100%);
+}
+
+.metric-card.range {
+    border-top: 4px solid #e74c3c;
+    background: linear-gradient(135deg, #ffffff 0%, #fff5f5 100%);
+}
+
+.metric-card.consistent {
+    border-top: 4px solid #27ae60;
+    background: linear-gradient(135deg, #ffffff 0%, #f0fff4 100%);
+}
+
+.metric-card-compact.primary {
+    border-top: 3px solid #3498db;
+    background: linear-gradient(135deg, #ffffff 0%, #f8f9ff 100%);
+}
+
+.metric-card-compact.range {
+    border-top: 3px solid #e74c3c;
+    background: linear-gradient(135deg, #ffffff 0%, #fff5f5 100%);
+}
+
+.metric-card-compact.consistent {
+    border-top: 3px solid #27ae60;
+    background: linear-gradient(135deg, #ffffff 0%, #f0fff4 100%);
+}
+
+.metric-icon {
+    font-size: 30px;
+    margin-bottom: 10px;
+}
+
+.metric-label {
+    font-size: 14px;
+    color: #7f8c8d;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.metric-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: #27ae60;
+    margin-bottom: 8px;
+}
+
+.metric-detail {
+    font-size: 12px;
+    color: #95a5a6;
+    line-height: 1.4;
+    margin-top: 5px;
+}
+
+/* Compact metric styles */
+.metric-card-compact .metric-icon {
+    font-size: 20px;
+    margin-bottom: 6px;
+}
+
+.metric-card-compact .metric-label {
+    font-size: 10px;
+    color: #7f8c8d;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+.metric-card-compact .metric-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: #27ae60;
+    margin-bottom: 4px;
+}
+
+.metric-card-compact .metric-detail {
+    font-size: 9px;
+    color: #95a5a6;
+    line-height: 1.2;
+    margin-top: 2px;
+}
+
+/* Payee Breakdown Page Styles */
+.payee-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    max-width: 700px;
+    margin: 0 auto;
+}
+
+.payee-card-compact {
+    background: white;
+    border: 1px solid #e3e8ee;
+    border-radius: 6px;
+    padding: 12px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    page-break-inside: avoid;
+    height: fit-content;
+    font-size: 11px;
+}
+
+.payee-name-compact {
+    margin: 0 0 8px 0;
+    font-size: 14px;
+    font-weight: 700;
+    text-align: center;
+}
+
+.metric-compact {
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #f8f9fa;
+}
+
+.metric-compact:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.label-compact {
+    display: inline-block;
+    font-size: 9px;
+    color: #7f8c8d;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.2px;
+    margin-bottom: 2px;
+    width: 100%;
+}
+
+.value-compact {
+    font-size: 12px;
+    font-weight: 700;
+    color: #27ae60;
+    display: block;
+}
+
+.value-compact.highlight {
+    color: #e74c3c;
+    font-size: 13px;
+}
+
+.detail-compact {
+    font-size: 8px;
+    color: #95a5a6;
+    margin-top: 1px;
+    line-height: 1.2;
+}
+
+/* Legacy Analytics Container for backwards compatibility */
+.analytics-container {
+    margin-bottom: 30px;
+    padding: 20px;
+    border: 2px solid #3498db;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #f8f9ff 0%, #e8f2ff 100%);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    page-break-inside: avoid;
+}
+
+.analytics-title {
+    margin: 0 0 20px 0;
+    color: #2980b9;
+    font-size: 20px;
+    font-weight: 700;
+    text-align: center;
+    border-bottom: 2px solid #3498db;
+    padding-bottom: 10px;
+}
+
+/* Legacy styles for backwards compatibility */
 .payment-summary {
     margin-bottom: 20px;
     padding: 15px;
@@ -229,10 +599,6 @@ body {
     font-size: 13px;
     line-height: 1.4;
     page-break-inside: avoid;
-}
-
-.payee-name {
-    font-weight: bold;
 }
 
 .amount-range {
@@ -260,20 +626,80 @@ body {
 @media print {
     body { 
         margin: 0;
-        padding: 10px;
+        padding: 0;
     }
+    
     .schedule-table {
         box-shadow: none;
+        page-break-before: always;
     }
     
-    /* Ensure payment summary stays on first page, table starts on second */
+    /* New page layout styles for print */
+    .intro-page {
+        page-break-after: always;
+        page-break-inside: avoid;
+        min-height: 90vh;
+        padding: 20px;
+        margin: 0;
+    }
+    
+    .intro-period-page {
+        page-break-after: always;
+        page-break-inside: avoid;
+        padding: 15px;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+    
+    .period-page, .payee-page {
+        page-break-before: always;
+        page-break-after: always;
+        page-break-inside: avoid;
+        min-height: 90vh;
+        padding: 20px;
+        margin: 0;
+    }
+    
+    /* Ensure grids fit well on page */
+    .overview-metrics {
+        gap: 15px;
+        max-width: 550px;
+    }
+    
+    .overview-metrics-compact {
+        gap: 12px;
+        max-width: 450px;
+    }
+    
+    .metric-card-compact {
+        box-shadow: none;
+        border: 1px solid #e3e8ee;
+        padding: 10px;
+        font-size: 11px;
+    }
+    
+    .payee-grid {
+        gap: 10px;
+        max-width: 600px;
+    }
+    
+    .payee-card-compact {
+        box-shadow: none;
+        border: 1px solid #e3e8ee;
+        padding: 10px;
+        font-size: 10px;
+    }
+    
+    .payee-name-compact {
+        font-size: 12px;
+        margin-bottom: 6px;
+    }
+    
+    /* Legacy styles */
     .payment-summary {
         page-break-inside: avoid;
-        page-break-after: always;
-    }
-    
-    .schedule-table {
-        page-break-before: auto;
     }
     
     .payee-summary {
@@ -295,5 +721,11 @@ body {
     /* Prevent orphaned headers */
     .month-header-row {
         page-break-after: avoid;
+    }
+    
+    /* Remove hover effects in print */
+    .metric-card:hover {
+        transform: none;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.1);
     }
 }

@@ -1,6 +1,6 @@
 import csv
 from typing import List
-from scheduler.cash_flow import PaymentScheduleResult
+from scheduler.payment_scheduler import PaymentScheduleResult
 
 
 class CsvExporter:

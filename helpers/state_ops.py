@@ -78,8 +78,13 @@ def _validate_state_structure(data: dict, filename: str) -> list[str]:
                         errors.append(f"❌ Bill '{bill_name}' price_history[{j}]: Missing 'amount' field")
                     if not price_entry.get('recurrence'):
                         errors.append(f"❌ Bill '{bill_name}' price_history[{j}]: Missing 'recurrence' field")
-                    if not price_entry.get('start_date'):
-                        errors.append(f"❌ Bill '{bill_name}' price_history[{j}]: Missing 'start_date' field")
+                    # start_date can be either directly specified or taken from recurrence.start
+                    has_start_date = price_entry.get('start_date') is not None
+                    has_recurrence_start = (price_entry.get('recurrence', {}).get('start') is not None if 
+                                          isinstance(price_entry.get('recurrence'), dict) else False)
+                    
+                    if not has_start_date and not has_recurrence_start:
+                        errors.append(f"❌ Bill '{bill_name}' price_history[{j}]: Missing 'start_date' field (or 'start' in recurrence)")
             elif has_old_format and bill['recurrence'] is not None:
                 recurrence = bill['recurrence']
                 if not isinstance(recurrence, dict):
@@ -130,6 +135,82 @@ def _validate_state_structure(data: dict, filename: str) -> list[str]:
                                 errors.append(f"❌ Payee '{payee_name}', Schedule #{j}: Calendar recurrence missing 'interval' (monthly, quarterly, yearly)")
                             elif kind == 'interval' and not recurrence.get('interval'):
                                 errors.append(f"❌ Payee '{payee_name}', Schedule #{j}: Interval recurrence missing 'interval' (daily, weekly, monthly, etc.)")
+            
+            # Validate default_share_percentage if present
+            default_share = payee.get('default_share_percentage')
+            if default_share is not None:
+                if not isinstance(default_share, (int, float)):
+                    errors.append(f"❌ Payee '{payee_name}': 'default_share_percentage' must be a number")
+                elif default_share < 0 or default_share > 100:
+                    errors.append(f"❌ Payee '{payee_name}': 'default_share_percentage' must be between 0 and 100, got {default_share}")
+    
+    # Validate bill sharing system 
+    # This requires loading payees first to check for valid configurations
+    if isinstance(bills, list) and isinstance(payees, list):
+        # Create temporary payee objects for validation
+        temp_payees = []
+        for payee_data in payees:
+            if isinstance(payee_data, dict) and payee_data.get('name'):
+                from models.payee import Payee
+                try:
+                    temp_payee = Payee(
+                        name=payee_data['name'],
+                        default_share_percentage=payee_data.get('default_share_percentage')
+                    )
+                    temp_payees.append(temp_payee)
+                except:
+                    continue  # Skip invalid payees, already caught above
+        
+        # Validate each bill's share configuration
+        for i, bill in enumerate(bills, 1):
+            if not isinstance(bill, dict):
+                continue
+            
+            bill_name = bill.get('name', f'Bill #{i}')
+            share_data = bill.get('share')
+            
+            if share_data is not None:
+                from models.bill import BillShare, Bill
+                try:
+                    # Try to create a temporary BillShare to validate structure
+                    temp_share = BillShare.from_dict(share_data)
+                    
+                    # Check that excluded payees exist
+                    if temp_share.exclude:
+                        payee_names = {p.name for p in temp_payees}
+                        for excluded in temp_share.exclude:
+                            if excluded not in payee_names:
+                                errors.append(f"❌ Bill '{bill_name}': Excluded payee '{excluded}' not found in payees list")
+                    
+                    # Check that custom payees exist and percentages are valid
+                    if temp_share.custom:
+                        payee_names = {p.name for p in temp_payees}
+                        for payee_name, percentage in temp_share.custom.items():
+                            if payee_name not in payee_names:
+                                errors.append(f"❌ Bill '{bill_name}': Custom payee '{payee_name}' not found in payees list")
+                            if not isinstance(percentage, (int, float)):
+                                errors.append(f"❌ Bill '{bill_name}': Custom percentage for '{payee_name}' must be a number")
+                            elif percentage < 0 or percentage > 100:
+                                errors.append(f"❌ Bill '{bill_name}': Custom percentage for '{payee_name}' must be between 0 and 100, got {percentage}")
+                    
+                    # Create a temporary bill to test the share calculation
+                    if temp_payees:
+                        from models.recurrence import Recurrence
+                        from datetime import date
+                        temp_bill = Bill(
+                            name=bill_name,
+                            amount=100,  # Dummy amount
+                            recurrence=Recurrence(kind='calendar', interval='monthly', start=date(2025, 1, 1)),
+                            share=temp_share
+                        )
+                        
+                        # Test if the share calculation works
+                        is_valid, error_msg = temp_bill.validate_shares(temp_payees)
+                        if not is_valid:
+                            errors.append(f"❌ Bill '{bill_name}': {error_msg}")
+                
+                except Exception as e:
+                    errors.append(f"❌ Bill '{bill_name}': Invalid share configuration - {str(e)}")
     
     return errors
 

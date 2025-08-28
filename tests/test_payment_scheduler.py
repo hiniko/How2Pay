@@ -5,7 +5,7 @@ from models.bill import Bill
 from models.recurrence import Recurrence
 from models.schedule_options import ScheduleOptions
 from models.payee import Payee, PaySchedule
-from scheduler.cash_flow import CashFlowScheduler
+from scheduler.payment_scheduler import PaymentScheduler
 
 
 class TestCalculateMonthlyBillTotal(unittest.TestCase):
@@ -49,7 +49,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
     def test_no_bills_returns_zero(self):
         """Test that calculate_monthly_bill_total returns 0 when no bills exist."""
         state = self.create_test_state([])
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         total = scheduler.calculate_monthly_bill_total(3, 2024)
         self.assertEqual(total, 0.0)
@@ -58,7 +58,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
         """Test calculation with a single monthly bill due in the target month."""
         bill = self.create_monthly_bill("Rent", 1200.0, date(2024, 3, 15))
         state = self.create_test_state([bill])
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         total = scheduler.calculate_monthly_bill_total(3, 2024)
         self.assertEqual(total, 1200.0)
@@ -67,7 +67,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
         """Test that a monthly bill not due in target month doesn't count."""
         bill = self.create_monthly_bill("Rent", 1200.0, date(2024, 3, 15))
         state = self.create_test_state([bill])
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         # Check February (bill starts in March)
         total = scheduler.calculate_monthly_bill_total(2, 2024)
@@ -81,7 +81,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
             self.create_monthly_bill("Insurance", 300.0, date(2024, 3, 1))
         ]
         state = self.create_test_state(bills)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         total = scheduler.calculate_monthly_bill_total(3, 2024)
         self.assertEqual(total, 1650.0)  # 1200 + 150 + 300
@@ -90,7 +90,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
         """Test calculation with bi-monthly bill due in target month."""
         bill = self.create_bimonthly_bill("Insurance", 600.0, date(2024, 1, 15))
         state = self.create_test_state([bill])
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         # Should be due in January, March, May, etc.
         january_total = scheduler.calculate_monthly_bill_total(1, 2024)
@@ -108,7 +108,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
         # Test with a bill that we know will work correctly
         bill = self.create_quarterly_bill("Property Tax", 1800.0, date(2024, 4, 15))
         state = self.create_test_state([bill])
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         # Should be due in April (start month)
         april_total = scheduler.calculate_monthly_bill_total(4, 2024)
@@ -132,7 +132,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
         )
         bill = Bill(name="Temp Service", amount=100.0, recurrence=recurrence)
         state = self.create_test_state([bill])
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         # Should count in January and February
         january_total = scheduler.calculate_monthly_bill_total(1, 2024)
@@ -149,7 +149,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
         """Test that bills without recurrence are skipped."""
         bill = Bill(name="One-time", amount=500.0, recurrence=None)
         state = self.create_test_state([bill])
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         total = scheduler.calculate_monthly_bill_total(3, 2024)
         self.assertEqual(total, 0.0)
@@ -160,7 +160,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
         state = self.create_test_state([bill])
         
         # Set projection start to March 2024
-        scheduler = CashFlowScheduler(state, projection_start_month=3, projection_start_year=2024)
+        scheduler = PaymentScheduler(state, projection_start_month=3, projection_start_year=2024)
         
         # January and February should return 0 (before projection start)
         january_total = scheduler.calculate_monthly_bill_total(1, 2024)
@@ -177,7 +177,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
         """Test calculation for December (month boundary case)."""
         bill = self.create_monthly_bill("Rent", 1200.0, date(2024, 12, 15))
         state = self.create_test_state([bill])
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         total = scheduler.calculate_monthly_bill_total(12, 2024)
         self.assertEqual(total, 1200.0)
@@ -186,7 +186,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
         """Test calculation for February in a leap year."""
         bill = self.create_monthly_bill("Rent", 1200.0, date(2024, 2, 29))  # 2024 is leap year
         state = self.create_test_state([bill])
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         total = scheduler.calculate_monthly_bill_total(2, 2024)
         self.assertEqual(total, 1200.0)
@@ -199,7 +199,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
             # Note: quarterly bill starting Dec 2023 won't be due until April 2024
         ]
         state = self.create_test_state(bills)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         total = scheduler.calculate_monthly_bill_total(3, 2024)
         # Monthly: 1200, Bimonthly: 400 = 1600
@@ -212,7 +212,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
             self.create_monthly_bill("Last Day Bill", 200.0, date(2024, 3, 31))
         ]
         state = self.create_test_state([bills[0], bills[1]])
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         total = scheduler.calculate_monthly_bill_total(3, 2024)
         self.assertEqual(total, 300.0)
@@ -228,7 +228,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
         )
         bill = Bill(name="Weekly Service", amount=50.0, recurrence=recurrence)
         state = self.create_test_state([bill])
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         # Should have multiple occurrences in March
         total = scheduler.calculate_monthly_bill_total(3, 2024)
@@ -246,7 +246,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
         )
         bill = Bill(name="Weekly Payment", amount=25.0, recurrence=recurrence)
         state = self.create_test_state([bill])
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         total = scheduler.calculate_monthly_bill_total(3, 2024)
         # Should count all weekly occurrences in March
@@ -263,7 +263,7 @@ class TestCalculateMonthlyBillTotal(unittest.TestCase):
         )
         bill = Bill(name="Ending Service", amount=200.0, recurrence=recurrence)
         state = self.create_test_state([bill])
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         # Should count in March since end date is after start of month
         # but the recurrence end is before the due date
@@ -312,7 +312,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         bills = []
         payees = [self.create_monthly_payee("Alice", 3000.0, date(2024, 2, 15))]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
         self.assertEqual(result.schedule_items, [])
@@ -322,7 +322,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         bills = [self.create_monthly_bill("Rent", 1200.0, date(2024, 3, 15))]
         payees = []
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
         self.assertEqual(result.schedule_items, [])
@@ -332,7 +332,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         bills = [self.create_monthly_bill("Rent", 1200.0, date(2024, 3, 15))]
         payees = [self.create_monthly_payee("Alice", 3000.0, date(2024, 2, 15))]  # Income in Feb
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
         
@@ -352,7 +352,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
             self.create_monthly_payee("Bob", 2000.0, date(2024, 2, 15))
         ]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
         
@@ -376,7 +376,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
             self.create_monthly_payee("Bob", 2000.0, date(2024, 4, 15))     # Income in Apr (not Feb)
         ]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
         
@@ -407,7 +407,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
             self.create_monthly_payee("Bob", 2000.0, date(2024, 2, 15))
         ]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
         
@@ -430,7 +430,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         bills = [self.create_monthly_bill("Rent", 1200.0, date(2024, 3, 15))]
         payees = [self.create_monthly_payee("Alice", 3000.0, date(2024, 2, 15))]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 3)  # 3 months
         
@@ -448,7 +448,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         bills = [self.create_monthly_bill("Rent", 1200.0, date(2024, 12, 15))]  # Dec 2024
         payees = [self.create_monthly_payee("Alice", 3000.0, date(2024, 11, 15))]  # Nov income
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(12, 2024, 2)  # Dec 2024, Jan 2025
         
@@ -466,7 +466,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         state = self.create_simple_test_state(bills, payees)
         
         # Set projection start to March (so Jan-Feb bills should be filtered)
-        scheduler = CashFlowScheduler(state, projection_start_month=3, projection_start_year=2024)
+        scheduler = PaymentScheduler(state, projection_start_month=3, projection_start_year=2024)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 3)  # Mar, Apr, May
         
@@ -484,7 +484,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         ]
         payees = [self.create_monthly_payee("Alice", 3000.0, date(2024, 2, 15))]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
         
@@ -511,7 +511,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         
         payees = [alice]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
         
@@ -552,7 +552,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         
         payees = [alice, bob]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
         
@@ -588,7 +588,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         
         payees = [alice]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
         
@@ -617,7 +617,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         bills = [self.create_monthly_bill("Rent", 1000.0, date(2024, 3, 15))]
         payees = [self.create_monthly_payee("Alice", 2000.0, date(2024, 2, 15))]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
         
@@ -648,7 +648,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         
         payees = [alice]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
         
@@ -682,7 +682,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         
         payees = [alice]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
         
@@ -724,7 +724,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         
         payees = [alice]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
         
@@ -770,7 +770,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         
         payees = [alice]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
         
@@ -806,7 +806,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         
         payees = [alice, bob]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         # Test March 2024 - Bob should not contribute
         result = scheduler.calculate_proportional_contributions(3, 2024, 1)
@@ -842,7 +842,7 @@ class TestCalculateProportionalContributions(unittest.TestCase):
         
         payees = [alice, bob]
         state = self.create_simple_test_state(bills, payees)
-        scheduler = CashFlowScheduler(state)
+        scheduler = PaymentScheduler(state)
         
         # Test May 2024 - Both should contribute (Bob is active by then)
         result = scheduler.calculate_proportional_contributions(5, 2024, 1)
@@ -865,7 +865,7 @@ class TestGetPayeeIncomeInMonth(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures before each test method."""
         self.schedule_options = ScheduleOptions()
-        self.scheduler = CashFlowScheduler(StateFile(bills=[], payees=[], schedule_options=self.schedule_options))
+        self.scheduler = PaymentScheduler(StateFile(bills=[], payees=[], schedule_options=self.schedule_options))
     
     def create_payee_with_monthly_income(self, name, amount, start_date, description=None):
         """Helper method to create a payee with monthly income."""

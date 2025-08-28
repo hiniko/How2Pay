@@ -5,7 +5,7 @@ from models.recurrence import Recurrence
 from models.payee import Payee, PaySchedule
 from helpers.state_ops import load_state, save_state
 from models.state_file import StateFile
-from scheduler.cash_flow import CashFlowScheduler
+from scheduler.payment_scheduler import PaymentScheduler
 from tui.payment_schedule_display import PaymentScheduleDisplay
 from datetime import date
 from typing import Any, Optional

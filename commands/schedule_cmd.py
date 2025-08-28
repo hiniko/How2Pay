@@ -7,7 +7,7 @@ from models.schedule_options import ScheduleOptions
 from helpers.state_ops import load_state, save_state
 from helpers.validation import validate_month, validate_year, validate_projection_months, validate_cutoff_day
 from models.state_file import StateFile
-from scheduler.cash_flow import CashFlowScheduler
+from scheduler.payment_scheduler import PaymentScheduler
 from tui.payment_schedule_display import PaymentScheduleDisplay
 from exporters.csv_exporter import CsvExporter
 
@@ -25,9 +25,10 @@ def show(
     start_year: Optional[int] = typer.Option(None, "--start-year", help="Starting year"),
     export_csv: Optional[str] = typer.Option(None, "--export", help="Export to CSV file"),
     export_pdf: bool = typer.Option(False, "--pdf", help="Export to PDF file (auto-generates filename)"),
+    export_html: Optional[str] = typer.Option(None, "--html", help="Export to HTML file"),
     show_zero_contribution: bool = typer.Option(False, "--show-zero", help="Show income streams with 0% contribution")
 ) -> None:
-    """Show cash flow projection schedule."""
+    """Show payment projection schedule."""
     state: StateFile = load_state()
     
     # Use defaults if not specified
@@ -50,12 +51,12 @@ def show(
         console.print("[yellow]No bills or payees configured. Use 'how2pay bills add' and 'how2pay payees add' to get started.[/yellow]")
         return
     
-    console.print(f"[bold]Generating {projection_months}-month cash flow projection starting {target_month}/{target_year}[/bold]")
+    console.print(f"[bold]Generating {projection_months}-month payment projection starting {target_month}/{target_year}[/bold]")
     console.print(f"Bills: {len(state.bills)}, Payees: {len(state.payees)}")
     console.print("")
     
     # Create scheduler and generate projection
-    scheduler = CashFlowScheduler(state)
+    scheduler = PaymentScheduler(state)
     result = scheduler.calculate_proportional_contributions(
         start_month=target_month,
         start_year=target_year,
@@ -74,6 +75,15 @@ def show(
     if export_csv:
         CsvExporter.export_payment_schedule(result, export_csv)
         console.print(f"\n[green]Exported to {export_csv}[/green]")
+    
+    if export_html:
+        from exporters.html_generator import ProfessionalHtmlGenerator
+        generator = ProfessionalHtmlGenerator()
+        html_content = generator.generate_household_schedule_html(result, show_zero_contribution)
+        
+        with open(export_html, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        console.print(f"\n[green]Exported to {export_html}[/green]")
     
     if export_pdf:
         try:
@@ -106,6 +116,7 @@ def payee(
     start_month: Optional[int] = typer.Option(None, "--start-month", help="Starting month (1-12)"),
     start_year: Optional[int] = typer.Option(None, "--start-year", help="Starting year"),
     export_pdf: bool = typer.Option(False, "--pdf", help="Export to PDF file (auto-generates filename)"),
+    export_html: Optional[str] = typer.Option(None, "--html", help="Export to HTML file"),
     show_zero_contribution: bool = typer.Option(False, "--show-zero", help="Show income streams with 0% contribution")
 ) -> None:
     """Show payment schedule for a specific payee."""
@@ -151,10 +162,10 @@ def payee(
     console.print("")
     
     # Create scheduler and generate projection
-    from scheduler.cash_flow import CashFlowScheduler
+    from scheduler.payment_scheduler import PaymentScheduler
     from tui.payment_schedule_display import PaymentScheduleDisplay
     
-    scheduler = CashFlowScheduler(state)
+    scheduler = PaymentScheduler(state)
     result = scheduler.calculate_proportional_contributions(
         start_month=target_month,
         start_year=target_year,
@@ -168,6 +179,16 @@ def payee(
     # Display the payee-specific table
     display = PaymentScheduleDisplay(console)
     display.display_payee_schedule(result, payee_name, show_zero_contribution)
+    
+    # Export to HTML if requested
+    if export_html:
+        from exporters.html_generator import ProfessionalHtmlGenerator
+        generator = ProfessionalHtmlGenerator()
+        html_content = generator.generate_payee_schedule_html(result, payee_name, show_zero_contribution)
+        
+        with open(export_html, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        console.print(f"\n[green]Exported to {export_html}[/green]")
     
     # Export to PDF if requested
     if export_pdf:

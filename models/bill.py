@@ -4,9 +4,45 @@ from datetime import date
 from models.recurrence import Recurrence
 
 class BillShare:
-    def __init__(self, payee: str, percentage: float):
-        self.payee = payee
-        self.percentage = percentage
+    def __init__(self, exclude: Optional[List[str]] = None, custom: Optional[dict] = None):
+        """
+        New flexible bill sharing system.
+        
+        Args:
+            exclude: List of payee names to exclude from this bill
+            custom: Dictionary of payee_name -> percentage for custom splits
+        """
+        self.exclude = exclude or []
+        self.custom = custom or {}  # payee_name -> percentage
+    
+    @staticmethod
+    def from_dict(data) -> 'BillShare':
+        """Parse bill share from dictionary or list format."""
+        if isinstance(data, list):
+            # Old format: list of {payee: str, percentage: float}
+            # Convert to new format for backward compatibility
+            custom = {}
+            for item in data:
+                if isinstance(item, dict) and 'payee' in item and 'percentage' in item:
+                    custom[item['payee']] = item['percentage']
+            return BillShare(custom=custom)
+        elif isinstance(data, dict):
+            # New format: {exclude: [...], custom: {payee: percentage}}
+            return BillShare(
+                exclude=data.get('exclude', []),
+                custom=data.get('custom', {})
+            )
+        else:
+            return BillShare()
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary format."""
+        result = {}
+        if self.exclude:
+            result['exclude'] = self.exclude
+        if self.custom:
+            result['custom'] = self.custom
+        return result if result else None
 
 class BillPriceHistory:
     def __init__(self, amount: float, recurrence: Recurrence, start_date: date):
@@ -24,6 +60,9 @@ class BillPriceHistory:
         start_date = data.get('start_date')
         if isinstance(start_date, str):
             start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
+        elif start_date is None and recurrence and recurrence.start:
+            # Fall back to recurrence start if no explicit start_date
+            start_date = recurrence.start
         
         return BillPriceHistory(
             amount=data.get('amount'),
@@ -45,12 +84,12 @@ class Bill:
         amount: Optional[float] = None,
         recurrence: Optional[Recurrence] = None,
         price_history: Optional[List[BillPriceHistory]] = None,
-        share: Optional[List[BillShare]] = None,
+        share: Optional[BillShare] = None,
         ends: Optional[date] = None,
         description: Optional[str] = None,
     ):
         self.name = name
-        self.share = share or []
+        self.share = share or BillShare()
         self.ends = ends
         self.description = description
         
@@ -66,16 +105,11 @@ class Bill:
 
     @staticmethod
     def from_dict(data: dict) -> 'Bill':
-        # Deserialize share information
-        share = []
-        share_data = data.get('share', [])
-        if isinstance(share_data, list):
-            for share_item in share_data:
-                if isinstance(share_item, dict):
-                    share.append(BillShare(
-                        payee=share_item.get('payee', ''),
-                        percentage=share_item.get('percentage', 0.0)
-                    ))
+        # Deserialize share information using new format
+        share = None
+        share_data = data.get('share')
+        if share_data is not None:
+            share = BillShare.from_dict(share_data)
         
         # Handle price_history (new format) or amount/recurrence (old format)
         price_history = None
@@ -123,45 +157,109 @@ class Bill:
             'description': self.description
         }
     
-    def get_payee_percentage(self, payee_name: str) -> float:
-        """Get the percentage for a specific payee, or 0 if not assigned."""
-        for share in self.share:
-            if share.payee == payee_name:
-                return share.percentage
-        return 0.0
+    def calculate_payee_shares(self, all_payees: List) -> dict:
+        """
+        Calculate the actual percentage share for each payee based on:
+        1. Bill-specific exclusions
+        2. Bill-specific custom percentages
+        3. Payee default percentages
+        4. Equal split for remaining
+        
+        Args:
+            all_payees: List of Payee objects
+            
+        Returns:
+            dict: {payee_name: percentage}
+        """
+        result = {}
+        
+        # Start with all active payees
+        eligible_payees = [p for p in all_payees if p.name not in self.share.exclude]
+        
+        if not eligible_payees:
+            return result  # No one pays for this bill
+        
+        # Apply custom percentages from the bill
+        remaining_percentage = 100.0
+        unassigned_payees = []
+        
+        for payee in eligible_payees:
+            if payee.name in self.share.custom:
+                # Use bill-specific custom percentage
+                percentage = self.share.custom[payee.name]
+                result[payee.name] = percentage
+                remaining_percentage -= percentage
+            else:
+                unassigned_payees.append(payee)
+        
+        # Handle unassigned payees using defaults or equal split
+        if unassigned_payees and remaining_percentage > 0:
+            # Check if any unassigned payees have default percentages
+            payees_with_defaults = [p for p in unassigned_payees if p.default_share_percentage is not None]
+            payees_without_defaults = [p for p in unassigned_payees if p.default_share_percentage is None]
+            
+            # Calculate total default percentages
+            total_defaults = sum(p.default_share_percentage for p in payees_with_defaults)
+            
+            if total_defaults <= remaining_percentage:
+                # Apply default percentages
+                for payee in payees_with_defaults:
+                    result[payee.name] = payee.default_share_percentage
+                    remaining_percentage -= payee.default_share_percentage
+                
+                # Split any remaining percentage equally among payees without defaults
+                if payees_without_defaults and remaining_percentage > 0:
+                    equal_share = remaining_percentage / len(payees_without_defaults)
+                    for payee in payees_without_defaults:
+                        result[payee.name] = equal_share
+                elif remaining_percentage > 0.01:  # Leftover percentage with no one to assign to
+                    # Redistribute proportionally among payees with defaults
+                    if payees_with_defaults:
+                        for payee in payees_with_defaults:
+                            additional = (payee.default_share_percentage / total_defaults) * remaining_percentage
+                            result[payee.name] += additional
+            else:
+                # Default percentages exceed remaining - normalize them
+                for payee in payees_with_defaults:
+                    normalized = (payee.default_share_percentage / total_defaults) * remaining_percentage
+                    result[payee.name] = normalized
+                # Payees without defaults get nothing in this case
+                for payee in payees_without_defaults:
+                    result[payee.name] = 0.0
+        
+        return result
     
-    def set_payee_percentage(self, payee_name: str, percentage: float) -> None:
-        """Set the percentage for a specific payee."""
-        # Remove existing entry for this payee
-        self.share = [s for s in self.share if s.payee != payee_name]
-        # Add new entry if percentage > 0
-        if percentage > 0:
-            self.share.append(BillShare(payee_name, percentage))
-    
-    def get_total_percentage(self) -> float:
-        """Get the sum of all assigned percentages."""
-        return sum(share.percentage for share in self.share)
+    def get_payee_percentage(self, payee_name: str, all_payees: List = None) -> float:
+        """Get the percentage for a specific payee."""
+        if all_payees is None:
+            # Fallback to old behavior for backward compatibility
+            return self.share.custom.get(payee_name, 0.0)
+        
+        shares = self.calculate_payee_shares(all_payees)
+        return shares.get(payee_name, 0.0)
     
     def has_custom_shares(self) -> bool:
-        """Check if this bill has custom percentage assignments."""
-        return len(self.share) > 0
+        """Check if this bill has custom share configuration."""
+        return bool(self.share.exclude or self.share.custom)
     
-    def validate_percentages(self) -> tuple[bool, str]:
-        """Validate that percentages sum to 100% and are all non-negative."""
-        total = self.get_total_percentage()
-        
-        # Check for negative percentages
-        for share in self.share:
-            if share.percentage < 0:
-                return False, f"Payee '{share.payee}' has negative percentage: {share.percentage}%"
-            if share.percentage > 100:
-                return False, f"Payee '{share.payee}' has percentage over 100%: {share.percentage}%"
-        
-        # Check total
-        if abs(total - 100.0) > 0.01:  # Allow small floating point errors
-            return False, f"Total percentages must equal 100%, got {total}%"
-        
-        return True, "Valid"
+    def validate_shares(self, all_payees: List) -> tuple[bool, str]:
+        """Validate that the share configuration is valid."""
+        try:
+            shares = self.calculate_payee_shares(all_payees)
+            total = sum(shares.values())
+            
+            # Check total adds up to 100%
+            if abs(total - 100.0) > 0.01:
+                return False, f"Total percentages equal {total:.2f}%, should be 100%"
+            
+            # Check for negative percentages
+            for payee, percentage in shares.items():
+                if percentage < 0:
+                    return False, f"Payee '{payee}' has negative percentage: {percentage:.2f}%"
+            
+            return True, "Valid"
+        except Exception as e:
+            return False, f"Error calculating shares: {str(e)}"
     
     def get_price_info_for_date(self, target_date: date) -> Optional[BillPriceHistory]:
         """Get the appropriate price information for a given date."""

@@ -1,6 +1,99 @@
-bills: []
-payees: []
+bills:
+  - name: "Rent"
+    amount: 1200.0
+    recurrence:
+      kind: "calendar"
+      interval: "monthly"
+      start: "2024-01-01"
+  - name: "Electricity"
+    amount: 85.0
+    recurrence:
+      kind: "calendar"
+      interval: "monthly"
+      start: "2024-01-05"
+  - name: "Internet"
+    amount: 45.0
+    recurrence:
+      kind: "calendar"
+      interval: "monthly"
+      start: "2024-01-15"
+  - name: "Groceries"
+    amount: 120.0
+    recurrence:
+      kind: "interval"
+      interval: "weekly"
+      every: 1
+      start: "2024-01-07"
+    share:
+      - payee: "Alice"
+        percentage: 25.0
+      - payee: "Bob"
+        percentage: 35.0
+      - payee: "Charlie"
+        percentage: 40.0
+  - name: "Netflix"
+    amount: 12.99
+    recurrence:
+      kind: "calendar"
+      interval: "monthly"
+      start: "2024-01-20"
+    share:
+      - payee: "Bob"
+        percentage: 100.0
+
+payees:
+  - name: "Alice"
+    description: "Software Engineer"
+    pay_schedules:
+      - amount: 2200.0
+        description: "Monthly Salary"
+        recurrence:
+          kind: "calendar"
+          interval: "monthly"
+          start: "2024-01-28"
+      - amount: 450.0
+        description: "Freelance Work"
+        recurrence:
+          kind: "calendar"
+          interval: "monthly"
+          start: "2024-01-15"
+          end: "2024-06-15"
+        contribution_percentage: 100.0
+  - name: "Bob"
+    description: "Part-time Teacher"
+    pay_schedules:
+      - amount: 1200.0
+        description: "Teaching Salary"
+        recurrence:
+          kind: "calendar"
+          interval: "monthly"
+          start: "2024-01-25"
+      - amount: 300.0
+        description: "Tutoring"
+        recurrence:
+          kind: "interval"
+          interval: "weekly"
+          every: 1
+          start: "2024-01-12"
+  - name: "Charlie"
+    description: "Graduate Student"
+    start_date: "2024-03-01"
+    pay_schedules:
+      - amount: 800.0
+        description: "Stipend"
+        recurrence:
+          kind: "calendar"
+          interval: "monthly"
+          start: "2024-03-01"
+      - amount: 200.0
+        description: "Weekend Job"
+        recurrence:
+          kind: "interval"
+          interval: "weekly"
+          every: 1
+          start: "2024-03-02"
+
 schedule_options:
-  cutoff_day: 28
+  cutoff_day: 22
   default_projection_months: 12
-  weekend_adjustment: last_working_day
+  weekend_adjustment: "last_working_day"

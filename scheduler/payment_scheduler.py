@@ -1,8 +1,31 @@
 from datetime import date, timedelta
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from dataclasses import dataclass
 from models.state_file import StateFile
 from models.payee import Payee, PaySchedule
+
+@dataclass
+class PayeeAnalytics:
+    """Analytics data for a single payee."""
+    payee_name: str
+    min_amount: float
+    max_amount: float
+    average_amount: float
+    total_amount: float
+    min_months: List[str]  # Month names when minimum occurs
+    max_months: List[str]  # Month names when maximum occurs
+    is_consistent: bool    # True if same amount every month
+
+@dataclass
+class PeriodAnalytics:
+    """Analytics data for the entire projection period."""
+    total_bills_required: float
+    average_monthly_requirement: float
+    min_monthly_total: float
+    max_monthly_total: float
+    min_months: List[str]  # Month names when minimum total occurs
+    max_months: List[str]  # Month names when maximum total occurs
+    payee_analytics: Dict[str, PayeeAnalytics]
 
 @dataclass
 class PaymentScheduleItem:
@@ -45,8 +68,9 @@ class PaymentScheduleResult:
     start_month: int
     start_year: int
     months_ahead: int
+    analytics: PeriodAnalytics
 
-class CashFlowScheduler:
+class PaymentScheduler:
     def __init__(self, state: StateFile, projection_start_month: int = None, projection_start_year: int = None):
         self.state = state
         self.schedule_options = state.schedule_options
@@ -454,13 +478,17 @@ class CashFlowScheduler:
                         total_income_from_previous_month, weekend_adjusted_shortfall)
                     schedule_items.extend(proportional_items)
         
+        # Generate analytics
+        analytics = self._generate_analytics(schedule_items, monthly_bill_totals)
+        
         return PaymentScheduleResult(
             schedule_items=schedule_items,
             monthly_bill_totals=monthly_bill_totals,
             weekend_adjustments=weekend_adjustments,
             start_month=start_month,
             start_year=start_year,
-            months_ahead=months_ahead
+            months_ahead=months_ahead,
+            analytics=analytics
         )
     
     def check_for_weekend_adjusted_payments(self, payee: Payee, target_month: int, target_year: int) -> List[Tuple[PaySchedule, date, date]]:
@@ -533,15 +561,12 @@ class CashFlowScheduler:
                     if not payment_price_info:
                         break
                     
-                    if bill.has_custom_shares():
-                        # Use custom percentage
-                        percentage = bill.get_payee_percentage(payee_name)
-                        total_responsibility += payment_price_info.amount * (percentage / 100.0)
-                    else:
-                        # Use equal split among all active payees
-                        num_active_payees = sum(1 for p in self.state.payees if p.is_active_for_month(current_year, current_month))
-                        if num_active_payees > 0:
-                            total_responsibility += payment_price_info.amount / num_active_payees
+                    # Get active payees for this month
+                    active_payees = [p for p in self.state.payees if p.is_active_for_month(current_year, current_month)]
+                    
+                    # Calculate payee's share using the new system
+                    percentage = bill.get_payee_percentage(payee_name, active_payees)
+                    total_responsibility += payment_price_info.amount * (percentage / 100.0)
                     break
                 
                 check_date = next_payment
@@ -590,4 +615,83 @@ class CashFlowScheduler:
                 check_date = next_payment
         
         return bills_due
+
+    def _generate_analytics(self, schedule_items: List[PaymentScheduleItem], 
+                           monthly_bill_totals: List[MonthlyBillTotal]) -> PeriodAnalytics:
+        """Generate comprehensive analytics for the payment schedule."""
+        from collections import defaultdict
+        
+        # Group by payee and month to calculate monthly totals
+        payee_monthly_totals = defaultdict(lambda: defaultdict(float))
+        
+        for item in schedule_items:
+            month_key = item.payment_date.strftime('%Y-%m')
+            payee_monthly_totals[item.payee_name][month_key] += item.required_contribution
+        
+        # Calculate period-level analytics
+        monthly_totals = []
+        for monthly_total in monthly_bill_totals:
+            monthly_totals.append(monthly_total.total_bills)
+        
+        total_bills_required = sum(monthly_totals) if monthly_totals else 0.0
+        average_monthly_requirement = total_bills_required / len(monthly_totals) if monthly_totals else 0.0
+        
+        # Find min/max monthly totals and their months
+        min_monthly_total = min(monthly_totals) if monthly_totals else 0.0
+        max_monthly_total = max(monthly_totals) if monthly_totals else 0.0
+        
+        min_months = []
+        max_months = []
+        if monthly_totals:
+            for monthly_total in monthly_bill_totals:
+                month_name = date(monthly_total.year, monthly_total.month, 1).strftime('%B %Y')
+                if monthly_total.total_bills == min_monthly_total:
+                    min_months.append(month_name)
+                if monthly_total.total_bills == max_monthly_total:
+                    max_months.append(month_name)
+        
+        # Calculate per-payee analytics
+        payee_analytics = {}
+        for payee_name, monthly_totals_dict in payee_monthly_totals.items():
+            if not monthly_totals_dict:
+                continue
+                
+            amounts = list(monthly_totals_dict.values())
+            min_amount = min(amounts)
+            max_amount = max(amounts)
+            total_amount = sum(amounts)
+            average_amount = total_amount / len(amounts)
+            is_consistent = min_amount == max_amount
+            
+            # Find months for min/max amounts
+            min_months_payee = []
+            max_months_payee = []
+            for month_key, amount in monthly_totals_dict.items():
+                month_name = date.fromisoformat(f"{month_key}-01").strftime('%B %Y')
+                if amount == min_amount:
+                    min_months_payee.append(month_name)
+                if amount == max_amount:
+                    max_months_payee.append(month_name)
+            
+            # Limit to first 2 months to avoid clutter
+            payee_analytics[payee_name] = PayeeAnalytics(
+                payee_name=payee_name,
+                min_amount=min_amount,
+                max_amount=max_amount,
+                average_amount=average_amount,
+                total_amount=total_amount,
+                min_months=min_months_payee[:2],
+                max_months=max_months_payee[:2],
+                is_consistent=is_consistent
+            )
+        
+        return PeriodAnalytics(
+            total_bills_required=total_bills_required,
+            average_monthly_requirement=average_monthly_requirement,
+            min_monthly_total=min_monthly_total,
+            max_monthly_total=max_monthly_total,
+            min_months=min_months[:2],  # Limit to first 2 months
+            max_months=max_months[:2],
+            payee_analytics=payee_analytics
+        )
 

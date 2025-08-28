@@ -5,7 +5,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
-from scheduler.cash_flow import PaymentScheduleResult, WeekendAdjustment, BillDue
+from scheduler.payment_scheduler import PaymentScheduleResult, WeekendAdjustment, BillDue, PayeeAnalytics, PeriodAnalytics
 from helpers.formatting import get_formatter
 from helpers.payee_colors import PayeeColorGenerator
 
@@ -144,7 +144,7 @@ class PaymentScheduleDisplay:
             month_data = monthly_data[month_key]
             
             # The month_key represents when income is received. We need to find which
-            # month's bills this income is responsible for. Based on the cash flow logic,
+            # month's bills this income is responsible for. Based on the payment logic,
             # income from month X pays bills for month X+1
             current_date = date.fromisoformat(f"{month_key}-01")
             if current_date.month == 12:
@@ -261,119 +261,135 @@ class PaymentScheduleDisplay:
         self.console.print(table)
     
     def _display_payment_summary(self, result: PaymentScheduleResult, show_zero_contribution: bool, payee_colors: Dict[str, str]) -> None:
-        """Display min/max payment summary for each payee."""
-        # Filter schedule items based on contribution preference
-        filtered_items = result.schedule_items
+        """Display comprehensive payment analytics."""
+        analytics = result.analytics
+        
+        # Filter payees based on contribution preference
+        displayed_payees = analytics.payee_analytics
         if not show_zero_contribution:
-            filtered_items = [item for item in result.schedule_items if item.required_contribution > 0]
+            displayed_payees = {name: payee_analytics for name, payee_analytics in analytics.payee_analytics.items() 
+                               if payee_analytics.max_amount > 0}
         
-        # Group by payee and month to calculate monthly totals
-        payee_monthly_totals = defaultdict(lambda: defaultdict(float))
-        
-        for item in filtered_items:
-            month_key = item.payment_date.strftime('%Y-%m')
-            payee_monthly_totals[item.payee_name][month_key] += item.required_contribution
-        
-        if not payee_monthly_totals:
+        if not displayed_payees:
             return
         
-        # Calculate min/max for each payee
-        payee_summary = {}
-        for payee_name, monthly_totals in payee_monthly_totals.items():
-            if monthly_totals:
-                min_amount = min(monthly_totals.values())
-                max_amount = max(monthly_totals.values())
-                
-                # Find months for min/max amounts
-                min_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
-                             for month, amount in monthly_totals.items() if amount == min_amount]
-                max_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
-                             for month, amount in monthly_totals.items() if amount == max_amount]
-                
-                payee_summary[payee_name] = {
-                    'min_amount': min_amount,
-                    'max_amount': max_amount,
-                    'min_months': min_months[:2],  # Limit to first 2 months to avoid clutter
-                    'max_months': max_months[:2]
-                }
-        
-        # Create summary text
+        # Build comprehensive analytics display
         summary_lines = []
-        summary_lines.append("[bold]Payment Range Summary[/bold]\n")
         
-        for payee_name in sorted(payee_summary.keys()):
-            summary = payee_summary[payee_name]
+        # Period Overview Section
+        summary_lines.append("[bold blue]📊 PROJECTION ANALYTICS[/bold blue]\n")
+        
+        # Period totals and averages
+        total_str = self.formatter.format_currency(analytics.total_bills_required)
+        avg_str = self.formatter.format_currency(analytics.average_monthly_requirement)
+        summary_lines.append(f"[bold]Period Overview ({result.months_ahead} months):[/bold]")
+        summary_lines.append(f"  • Total Bills Required: {total_str}")
+        summary_lines.append(f"  • Average Monthly Cost: {avg_str}")
+        
+        # Monthly variation
+        if analytics.min_monthly_total != analytics.max_monthly_total:
+            min_monthly_str = self.formatter.format_currency(analytics.min_monthly_total)
+            max_monthly_str = self.formatter.format_currency(analytics.max_monthly_total)
+            min_months_str = ", ".join(analytics.min_months)
+            max_months_str = ", ".join(analytics.max_months)
+            
+            summary_lines.append(f"  • Monthly Range: {min_monthly_str} - {max_monthly_str}")
+            summary_lines.append(f"    - Lowest: {min_months_str}")
+            summary_lines.append(f"    - Highest: {max_months_str}")
+        else:
+            consistent_str = self.formatter.format_currency(analytics.min_monthly_total)
+            summary_lines.append(f"  • Monthly Cost: {consistent_str} (consistent)")
+        
+        summary_lines.append("")  # Spacing
+        
+        # Payee Breakdown Section
+        summary_lines.append("[bold]👥 PAYEE BREAKDOWN:[/bold]")
+        
+        for payee_name in sorted(displayed_payees.keys()):
+            payee_analytics = displayed_payees[payee_name]
             color = payee_colors.get(payee_name, "#ffffff")
             
-            min_amount_str = self.formatter.format_currency(summary['min_amount'])
-            max_amount_str = self.formatter.format_currency(summary['max_amount'])
+            # Payee header with name
+            summary_lines.append(f"[bold][{color}]{payee_name}[/{color}][/bold]:")
             
-            min_months_str = ", ".join(summary['min_months'])
-            max_months_str = ", ".join(summary['max_months'])
+            # Payment range
+            min_amount_str = self.formatter.format_currency(payee_analytics.min_amount)
+            max_amount_str = self.formatter.format_currency(payee_analytics.max_amount)
+            avg_amount_str = self.formatter.format_currency(payee_analytics.average_amount)
+            total_amount_str = self.formatter.format_currency(payee_analytics.total_amount)
             
-            if summary['min_amount'] == summary['max_amount']:
-                # Same amount every month
-                line = f"[{color}]{payee_name}[/{color}]: {max_amount_str} (consistent)"
+            if payee_analytics.is_consistent:
+                summary_lines.append(f"  • Payment: {max_amount_str}/month (consistent)")
             else:
-                line = f"[{color}]{payee_name}[/{color}]: {min_amount_str} - {max_amount_str}"
-                line += f" (min: {min_months_str}, max: {max_months_str})"
+                min_months_str = ", ".join(payee_analytics.min_months)
+                max_months_str = ", ".join(payee_analytics.max_months)
+                summary_lines.append(f"  • Range: {min_amount_str} - {max_amount_str}")
+                summary_lines.append(f"    - Min: {min_months_str}")
+                summary_lines.append(f"    - Max: {max_months_str}")
             
-            summary_lines.append(line)
+            summary_lines.append(f"  • Average: {avg_amount_str}/month")
+            summary_lines.append(f"  • Total: {total_amount_str} over {result.months_ahead} months")
+            summary_lines.append("")  # Spacing between payees
         
-        # Display the summary in a panel
+        # Display in a comprehensive panel
         summary_text = "\n".join(summary_lines)
-        panel = Panel(summary_text, title="💰 Payment Planning", border_style="blue")
+        panel = Panel(summary_text, title="💰 Payment Planning & Analytics", border_style="blue", padding=(1, 2))
         self.console.print(panel)
         self.console.print()  # Add spacing before table
     
-    def _display_payee_payment_summary(self, payee_items: List, payee_name: str, payee_colors: Dict[str, str]) -> None:
-        """Display min/max payment summary for a specific payee."""
-        if not payee_items:
+    def _display_payee_payment_summary(self, result: PaymentScheduleResult, payee_name: str, payee_colors: Dict[str, str]) -> None:
+        """Display comprehensive payment analytics for a specific payee."""
+        analytics = result.analytics
+        
+        # Get analytics for this specific payee
+        payee_analytics = analytics.payee_analytics.get(payee_name)
+        if not payee_analytics or payee_analytics.max_amount <= 0:
             return
         
-        # Group by month to calculate monthly totals for this payee
-        monthly_totals = defaultdict(float)
-        
-        for item in payee_items:
-            month_key = item.payment_date.strftime('%Y-%m')
-            monthly_totals[month_key] += item.required_contribution
-        
-        if not monthly_totals:
-            return
-        
-        # Calculate min/max for this payee
-        min_amount = min(monthly_totals.values())
-        max_amount = max(monthly_totals.values())
-        
-        # Find months for min/max amounts
-        min_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
-                     for month, amount in monthly_totals.items() if amount == min_amount]
-        max_months = [date.fromisoformat(f"{month}-01").strftime('%B %Y') 
-                     for month, amount in monthly_totals.items() if amount == max_amount]
-        
-        # Create summary text
+        # Build comprehensive payee analytics
         color = payee_colors.get(payee_name, "#ffffff")
-        min_amount_str = self.formatter.format_currency(min_amount)
-        max_amount_str = self.formatter.format_currency(max_amount)
-        
-        min_months_str = ", ".join(min_months[:2])  # Limit to first 2 months
-        max_months_str = ", ".join(max_months[:2])
-        
         summary_lines = []
-        summary_lines.append(f"[bold]Payment Range for [{color}]{payee_name}[/{color}][/bold]\n")
         
-        if min_amount == max_amount:
-            # Same amount every month
-            line = f"[{color}]{max_amount_str}[/{color}] (consistent across all months)"
+        # Header
+        summary_lines.append(f"[bold blue]📊 ANALYTICS for [{color}]{payee_name.upper()}[/{color}][/bold blue]\n")
+        
+        # Individual payee stats
+        min_amount_str = self.formatter.format_currency(payee_analytics.min_amount)
+        max_amount_str = self.formatter.format_currency(payee_analytics.max_amount)
+        avg_amount_str = self.formatter.format_currency(payee_analytics.average_amount)
+        total_amount_str = self.formatter.format_currency(payee_analytics.total_amount)
+        
+        # Payment Analysis
+        summary_lines.append("[bold]💰 Payment Analysis:[/bold]")
+        if payee_analytics.is_consistent:
+            summary_lines.append(f"  • Monthly Payment: {max_amount_str} (consistent)")
         else:
-            line = f"[{color}]{min_amount_str} - {max_amount_str}[/{color}]"
-            line += f" (min: {min_months_str}, max: {max_months_str})"
+            min_months_str = ", ".join(payee_analytics.min_months)
+            max_months_str = ", ".join(payee_analytics.max_months)
+            summary_lines.append(f"  • Payment Range: {min_amount_str} - {max_amount_str}")
+            summary_lines.append(f"    - Minimum: {min_months_str}")
+            summary_lines.append(f"    - Maximum: {max_months_str}")
         
-        summary_lines.append(line)
+        summary_lines.append(f"  • Average Monthly: {avg_amount_str}")
+        summary_lines.append("")
         
-        # Display the summary in a panel
+        # Period totals
+        summary_lines.append(f"[bold]📊 Period Summary ({result.months_ahead} months):[/bold]")
+        summary_lines.append(f"  • Total Contribution: {total_amount_str}")
+        
+        # Calculate percentage of total household costs
+        if analytics.total_bills_required > 0:
+            percentage = (payee_analytics.total_amount / analytics.total_bills_required) * 100
+            summary_lines.append(f"  • Share of Total Bills: {percentage:.1f}%")
+        
+        # Monthly comparison to household average
+        household_avg_str = self.formatter.format_currency(analytics.average_monthly_requirement)
+        summary_lines.append(f"  • vs Household Average: {avg_amount_str} vs {household_avg_str}")
+        
+        # Display in a comprehensive panel
         summary_text = "\n".join(summary_lines)
-        panel = Panel(summary_text, title="💰 Payment Planning", border_style="blue")
+        panel = Panel(summary_text, title=f"💰 {payee_name} - Payment Planning & Analytics", 
+                     border_style="blue", padding=(1, 2))
         self.console.print(panel)
         self.console.print()  # Add spacing before table
     
@@ -390,7 +406,7 @@ class PaymentScheduleDisplay:
             payee_items = [item for item in payee_items if item.required_contribution > 0]
         
         # Display payment summary for this specific payee
-        self._display_payee_payment_summary(payee_items, payee_name, payee_colors)
+        self._display_payee_payment_summary(result, payee_name, payee_colors)
         
         if not payee_items:
             self.console.print(f"[yellow]No schedule items found for payee '{payee_name}'[/yellow]")
@@ -499,20 +515,16 @@ class PaymentScheduleDisplay:
                 # Find the bill in the state to check payee assignment
                 for bill in state.bills:
                     if bill.name == bill_due.bill_name:
-                        if bill.has_custom_shares():
-                            # Use custom percentage if assigned
-                            payee_percentage = bill.get_payee_percentage(payee_name)
-                            if payee_percentage > 0:
-                                payee_amount = bill_due.amount * (payee_percentage / 100.0)
-                                payee_bills.append((bill_due.bill_name, payee_amount))
-                                payee_total += payee_amount
-                        else:
-                            # Equal split among all payees
-                            num_payees = len(state.payees)
-                            if num_payees > 0:
-                                payee_amount = bill_due.amount / num_payees
-                                payee_bills.append((bill_due.bill_name, payee_amount))
-                                payee_total += payee_amount
+                        # Get active payees for this month
+                        bill_month_date_obj = date.fromisoformat(f"{bill_month_key}-01")
+                        active_payees = [p for p in state.payees if p.is_active_for_month(bill_month_date_obj.year, bill_month_date_obj.month)]
+                        
+                        # Calculate payee's share using the new system
+                        payee_percentage = bill.get_payee_percentage(payee_name, active_payees)
+                        if payee_percentage > 0:
+                            payee_amount = bill_due.amount * (payee_percentage / 100.0)
+                            payee_bills.append((bill_due.bill_name, payee_amount))
+                            payee_total += payee_amount
                         break
             
             # Calculate row requirements

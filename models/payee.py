@@ -66,11 +66,13 @@ class Payee:
         pay_schedules: Optional[List[PaySchedule]] = None,
         description: Optional[str] = None,
         start_date: Optional[date] = None,
+        default_share_percentage: Optional[float] = None,
     ):
         self.name = name
         self.pay_schedules = pay_schedules or []
         self.description = description
         self.start_date = start_date  # Date when payee starts contributing to bills
+        self.default_share_percentage = default_share_percentage  # Default bill share percentage
 
     @staticmethod
     def from_dict(data: dict) -> 'Payee':
@@ -92,6 +94,7 @@ class Payee:
             name=data.get('name'),
             pay_schedules=pay_schedules,
             description=data.get('description'),
+            default_share_percentage=data.get('default_share_percentage'),
             start_date=start_date
         )
 
@@ -103,6 +106,8 @@ class Payee:
         }
         if self.start_date:
             result['start_date'] = self.start_date.isoformat()
+        if self.default_share_percentage is not None:
+            result['default_share_percentage'] = self.default_share_percentage
         return result
     
     def is_active_for_month(self, target_year: int, target_month: int) -> bool:

@@ -1,7 +1,7 @@
 [project]
-name = "finances"
+name = "how2pay"
 version = "0.1.0"
-description = "Personal finance management tool"
+description = "A Bill sharing and scheduling tool"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -22,11 +22,11 @@ pdf = [
 ]
 
 [project.scripts]
-how2pay = "finances.main:main"
+how2pay = "how2pay.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["finances*", "commands*", "models*", "helpers*", "scheduler*", "exporters*", "tui*"]
+include = ["how2pay*", "commands*", "models*", "helpers*", "scheduler*", "exporters*", "tui*"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

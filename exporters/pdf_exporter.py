@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from rich.console import Console
 from typing import Optional
-from scheduler.cash_flow import PaymentScheduleResult
+from scheduler.payment_scheduler import PaymentScheduleResult
 from .html_generator import ProfessionalHtmlGenerator
 
 

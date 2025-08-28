@@ -13,7 +13,7 @@ source venv/bin/activate
 python run_tests.py
 
 # Run specific test file
-python run_tests.py test_cash_flow
+python run_tests.py test_payment_scheduler
 
 # Run specific test class
 python run_tests.py TestCalculateMonthlyBillTotal
@@ -25,16 +25,16 @@ python run_tests.py TestCalculateMonthlyBillTotal
 python -m unittest discover tests -v
 
 # Run specific test class
-python -m unittest tests.test_cash_flow.TestCalculateMonthlyBillTotal -v
+python -m unittest tests.test_payment_scheduler.TestCalculateMonthlyBillTotal -v
 
 # Run specific test method
-python -m unittest tests.test_cash_flow.TestCalculateMonthlyBillTotal.test_no_bills_returns_zero -v
+python -m unittest tests.test_payment_scheduler.TestCalculateMonthlyBillTotal.test_no_bills_returns_zero -v
 ```
 
 ## Test Structure
 
-### test_cash_flow.py
-Contains comprehensive unit tests for cash flow functions in `scheduler/cash_flow.py`.
+### test_payment_scheduler.py
+Contains comprehensive unit tests for payment scheduler functions in `scheduler/cash_flow.py`.
 
 #### TestCalculateMonthlyBillTotal
 Tests for the `calculate_monthly_bill_total` function:
@@ -110,7 +110,7 @@ The tests use helper methods to create consistent test data:
 
 ## Future Test Additions
 
-When adding new cash flow functions, consider testing:
+When adding new payment scheduler functions, consider testing:
 
 - Income calculation functions  
 - Payee contribution calculations
